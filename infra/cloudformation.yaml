@@ -1,0 +1,1045 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  ECS Fargate + ALB + CloudFront deployment for Voice Agent Platform.
+  Provides a stable HTTPS/WSS endpoint for Twilio webhooks without requiring a custom domain.
+
+Parameters:
+  TwilioAccountSid:
+    Type: String
+    NoEcho: true
+    Description: Twilio Account SID
+  TwilioApiSid:
+    Type: String
+    NoEcho: true
+    Description: Twilio API Key SID
+  TwilioApiSecret:
+    Type: String
+    NoEcho: true
+    Description: Twilio API Key Secret
+  TwilioFromNumber:
+    Type: String
+    Description: Twilio phone number (E.164 format, e.g. +1234567890)
+  TwilioVerifiedCallerId:
+    Type: String
+    Description: Verified caller ID for outbound calls (E.164 format)
+    Default: ''
+  SipEndpoint:
+    Type: String
+    Description: SIP endpoint for call transfer (optional)
+    Default: ''
+  AwsRegion:
+    Type: String
+    Default: us-east-1
+    Description: AWS region for Bedrock API calls
+  ImageTag:
+    Type: String
+    Default: latest
+    Description: Docker image tag to deploy
+  SystemPrompt:
+    Type: String
+    Default: ''
+    Description: System prompt for the AI agent (leave empty to use the built-in default)
+  VoiceId:
+    Type: String
+    Default: tiffany
+    Description: Nova Sonic voice ID (tiffany, matthew, joey, salli, etc.)
+  Temperature:
+    Type: String
+    Default: '0.7'
+    Description: Model temperature (0.0-1.0, lower = more deterministic)
+  TopP:
+    Type: String
+    Default: '0.9'
+    Description: Model top-p sampling (0.0-1.0)
+  MaxTokens:
+    Type: String
+    Default: '1024'
+    Description: Maximum tokens for model response
+  TaskCpu:
+    Type: String
+    Default: '1024'
+    AllowedValues: ['256', '512', '1024', '2048', '4096']
+    Description: Fargate task CPU units
+  TaskMemory:
+    Type: String
+    Default: '2048'
+    AllowedValues: ['512', '1024', '2048', '4096', '8192', '16384']
+    Description: Fargate task memory (MB)
+  CustomersTable:
+    Type: String
+    Default: outbound-customers
+    Description: DynamoDB table name for customers
+  PromptsTable:
+    Type: String
+    Default: outbound-prompts
+    Description: DynamoDB table name for prompts
+  CallRecordsTable:
+    Type: String
+    Default: outbound-call-records
+    Description: DynamoDB table name for call records
+  FlowsTable:
+    Type: String
+    Default: outbound-flow-configs
+    Description: DynamoDB table name for flow configurations
+  ProjectsTable:
+    Type: String
+    Default: outbound-projects
+    Description: DynamoDB table name for projects
+  UsersTable:
+    Type: String
+    Default: outbound-users
+    Description: DynamoDB table name for users
+  JWTSecret:
+    Type: String
+    NoEcho: true
+    Description: JWT secret for authentication token signing (use strong random string, at least 32 characters)
+  InviteCode:
+    Type: String
+    NoEcho: true
+    Description: Invite code required for user registration
+  LabelConfigsTable:
+    Type: String
+    Default: label-configs
+    Description: DynamoDB table name for label configurations
+  CallLogsTable:
+    Type: String
+    Default: call-logs
+    Description: DynamoDB table name for call logs
+  ConnectInstanceId:
+    Type: String
+    Description: Amazon Connect Instance ID (required)
+    Description: Amazon Connect instance ID
+  ConnectRegion:
+    Type: String
+    Default: us-west-2
+    Description: AWS region where Amazon Connect instance is deployed
+
+Resources:
+
+  # ===== Networking =====
+
+  VPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 10.0.0.0/16
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+        - Key: Name
+          Value: voice-agent-vpc
+
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: voice-agent-igw
+
+  VPCGatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref VPC
+      InternetGatewayId: !Ref InternetGateway
+
+  # Public subnets (ALB + NAT Gateway)
+  PublicSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: 10.0.1.0/24
+      AvailabilityZone: !Select [0, !GetAZs '']
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: voice-agent-public-1
+
+  PublicSubnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: 10.0.2.0/24
+      AvailabilityZone: !Select [1, !GetAZs '']
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: voice-agent-public-2
+
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: voice-agent-public-rt
+
+  PublicRoute:
+    Type: AWS::EC2::Route
+    DependsOn: VPCGatewayAttachment
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+
+  PublicSubnet1RouteTableAssoc:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnet1
+      RouteTableId: !Ref PublicRouteTable
+
+  PublicSubnet2RouteTableAssoc:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnet2
+      RouteTableId: !Ref PublicRouteTable
+
+  # Private subnets (ECS tasks)
+  PrivateSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: 10.0.3.0/24
+      AvailabilityZone: !Select [0, !GetAZs '']
+      Tags:
+        - Key: Name
+          Value: voice-agent-private-1
+
+  PrivateSubnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: 10.0.4.0/24
+      AvailabilityZone: !Select [1, !GetAZs '']
+      Tags:
+        - Key: Name
+          Value: voice-agent-private-2
+
+  # NAT Gateway (single, cost-optimized)
+  NatEIP:
+    Type: AWS::EC2::EIP
+    DependsOn: VPCGatewayAttachment
+    Properties:
+      Domain: vpc
+
+  NatGateway:
+    Type: AWS::EC2::NatGateway
+    Properties:
+      AllocationId: !GetAtt NatEIP.AllocationId
+      SubnetId: !Ref PublicSubnet1
+      Tags:
+        - Key: Name
+          Value: voice-agent-nat
+
+  PrivateRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: voice-agent-private-rt
+
+  PrivateRoute:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref NatGateway
+
+  PrivateSubnet1RouteTableAssoc:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PrivateSubnet1
+      RouteTableId: !Ref PrivateRouteTable
+
+  PrivateSubnet2RouteTableAssoc:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PrivateSubnet2
+      RouteTableId: !Ref PrivateRouteTable
+
+  # ===== Security =====
+
+  ALBSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allow HTTP from CloudFront
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+          Description: HTTP from CloudFront (CloudFront uses dynamic IPs)
+      Tags:
+        - Key: Name
+          Value: voice-agent-alb-sg
+
+  ECSSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allow traffic from ALB to ECS tasks
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 3000
+          ToPort: 3000
+          SourceSecurityGroupId: !Ref ALBSecurityGroup
+          Description: App port from ALB
+      SecurityGroupEgress:
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+          Description: HTTPS outbound (Bedrock, Twilio API, ECR, Secrets Manager)
+      Tags:
+        - Key: Name
+          Value: voice-agent-ecs-sg
+
+  # Secrets Manager for Twilio credentials
+  TwilioSecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: voice-agent/twilio-credentials
+      Description: Twilio API credentials for Voice Agent Platform
+      SecretString: !Sub |
+        {
+          "TWILIO_ACCOUNT_SID": "${TwilioAccountSid}",
+          "TWILIO_API_SID": "${TwilioApiSid}",
+          "TWILIO_API_SECRET": "${TwilioApiSecret}",
+          "TWILIO_FROM_NUMBER": "${TwilioFromNumber}",
+          "TWILIO_VERIFIED_CALLER_ID": "${TwilioVerifiedCallerId}",
+          "SIP_ENDPOINT": "${SipEndpoint}"
+        }
+
+  # ECS Task Execution Role (pull images, read secrets, write logs)
+  ECSTaskExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: voice-agent-execution-role
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
+      Policies:
+        - PolicyName: SecretsManagerRead
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - secretsmanager:GetSecretValue
+                Resource: !Ref TwilioSecret
+
+  # ECS Task Role (application permissions: Bedrock + DynamoDB)
+  ECSTaskRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: voice-agent-task-role
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: BedrockInvoke
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - bedrock:InvokeModel
+                  - bedrock:InvokeModelWithResponseStream
+                  - bedrock:InvokeModelWithBidirectionalStream
+                Resource: '*'
+        - PolicyName: DynamoDBAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                  - dynamodb:Query
+                Resource:
+                  - !Sub 'arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${CustomersTable}'
+                  - !Sub 'arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${CustomersTable}/index/*'
+                  - !Sub 'arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${PromptsTable}'
+                  - !Sub 'arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${PromptsTable}/index/*'
+                  - !Sub 'arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${ProjectsTable}'
+                  - !Sub 'arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${ProjectsTable}/index/*'
+              - Effect: Allow
+                Action:
+                  - dynamodb:PutItem
+                  - dynamodb:UpdateItem
+                  - dynamodb:GetItem
+                  - dynamodb:Query
+                Resource:
+                  - !Sub 'arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${CallRecordsTable}'
+                  - !Sub 'arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${CallRecordsTable}/index/*'
+
+  # ===== Application =====
+
+  ECRRepository:
+    Type: AWS::ECR::Repository
+    Properties:
+      RepositoryName: voice-agent-server
+      ImageScanningConfiguration:
+        ScanOnPush: true
+      LifecyclePolicy:
+        LifecyclePolicyText: |
+          {
+            "rules": [
+              {
+                "rulePriority": 1,
+                "description": "Keep only last 5 images",
+                "selection": {
+                  "tagStatus": "any",
+                  "countType": "imageCountMoreThan",
+                  "countNumber": 5
+                },
+                "action": {
+                  "type": "expire"
+                }
+              }
+            ]
+          }
+
+  LogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: /ecs/voice-agent-server
+      RetentionInDays: 30
+
+  ECSCluster:
+    Type: AWS::ECS::Cluster
+    Properties:
+      ClusterName: voice-agent-cluster
+      ClusterSettings:
+        - Name: containerInsights
+          Value: enabled
+
+  TaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: voice-agent-server
+      Cpu: !Ref TaskCpu
+      Memory: !Ref TaskMemory
+      NetworkMode: awsvpc
+      RequiresCompatibilities:
+        - FARGATE
+      ExecutionRoleArn: !GetAtt ECSTaskExecutionRole.Arn
+      TaskRoleArn: !GetAtt ECSTaskRole.Arn
+      ContainerDefinitions:
+        - Name: voice-agent-server
+          Image: !Sub '${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/voice-agent-server:${ImageTag}'
+          Essential: true
+          PortMappings:
+            - ContainerPort: 3000
+              Protocol: tcp
+          Environment:
+            - Name: PORT
+              Value: '3000'
+            - Name: AWS_REGION
+              Value: !Ref AwsRegion
+            - Name: SYSTEM_PROMPT
+              Value: !Ref SystemPrompt
+            - Name: VOICE_ID
+              Value: !Ref VoiceId
+            - Name: TEMPERATURE
+              Value: !Ref Temperature
+            - Name: TOP_P
+              Value: !Ref TopP
+            - Name: MAX_TOKENS
+              Value: !Ref MaxTokens
+            - Name: CUSTOMERS_TABLE
+              Value: !Ref CustomersTable
+            - Name: PROMPTS_TABLE
+              Value: !Ref PromptsTable
+            - Name: CALL_RECORDS_TABLE
+              Value: !Ref CallRecordsTable
+            - Name: PROJECTS_TABLE
+              Value: !Ref ProjectsTable
+            - Name: LABEL_CONFIGS_TABLE
+              Value: !Ref LabelConfigsTable
+            - Name: CALL_LOGS_TABLE
+              Value: !Ref CallLogsTable
+            - Name: DYNAMODB_REGION
+              Value: !Ref AWS::Region
+          Secrets:
+            - Name: TWILIO_ACCOUNT_SID
+              ValueFrom: !Sub '${TwilioSecret}:TWILIO_ACCOUNT_SID::'
+            - Name: TWILIO_API_SID
+              ValueFrom: !Sub '${TwilioSecret}:TWILIO_API_SID::'
+            - Name: TWILIO_API_SECRET
+              ValueFrom: !Sub '${TwilioSecret}:TWILIO_API_SECRET::'
+            - Name: TWILIO_FROM_NUMBER
+              ValueFrom: !Sub '${TwilioSecret}:TWILIO_FROM_NUMBER::'
+            - Name: TWILIO_VERIFIED_CALLER_ID
+              ValueFrom: !Sub '${TwilioSecret}:TWILIO_VERIFIED_CALLER_ID::'
+            - Name: SIP_ENDPOINT
+              ValueFrom: !Sub '${TwilioSecret}:SIP_ENDPOINT::'
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref LogGroup
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: ecs
+          StopTimeout: 120
+
+  # ===== Load Balancer =====
+
+  ALB:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Name: voice-agent-alb
+      Scheme: internet-facing
+      Type: application
+      Subnets:
+        - !Ref PublicSubnet1
+        - !Ref PublicSubnet2
+      SecurityGroups:
+        - !Ref ALBSecurityGroup
+      LoadBalancerAttributes:
+        - Key: idle_timeout.timeout_seconds
+          Value: '3600'
+
+  TargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: voice-agent-tg
+      Port: 3000
+      Protocol: HTTP
+      VpcId: !Ref VPC
+      TargetType: ip
+      HealthCheckPath: /
+      HealthCheckIntervalSeconds: 30
+      HealthCheckTimeoutSeconds: 10
+      HealthyThresholdCount: 2
+      UnhealthyThresholdCount: 5
+      TargetGroupAttributes:
+        - Key: deregistration_delay.timeout_seconds
+          Value: '300'
+        - Key: stickiness.enabled
+          Value: 'true'
+        - Key: stickiness.type
+          Value: lb_cookie
+        - Key: stickiness.lb_cookie.duration_seconds
+          Value: '86400'
+
+  ALBListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      LoadBalancerArn: !Ref ALB
+      Port: 80
+      Protocol: HTTP
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref TargetGroup
+
+  # ===== ECS Service =====
+
+  ECSService:
+    Type: AWS::ECS::Service
+    DependsOn: ALBListener
+    Properties:
+      ServiceName: voice-agent-service
+      Cluster: !Ref ECSCluster
+      TaskDefinition: !Ref TaskDefinition
+      DesiredCount: 1
+      LaunchType: FARGATE
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          AssignPublicIp: DISABLED
+          Subnets:
+            - !Ref PrivateSubnet1
+            - !Ref PrivateSubnet2
+          SecurityGroups:
+            - !Ref ECSSecurityGroup
+      LoadBalancers:
+        - ContainerName: voice-agent-server
+          ContainerPort: 3000
+          TargetGroupArn: !Ref TargetGroup
+      DeploymentConfiguration:
+        MaximumPercent: 200
+        MinimumHealthyPercent: 100
+      HealthCheckGracePeriodSeconds: 60
+
+  # ===== CloudFront =====
+
+  CloudFrontDistribution:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+        Enabled: true
+        Comment: Voice Agent Platform - HTTPS/WSS termination
+        HttpVersion: http2and3
+        Origins:
+          - Id: ALBOrigin
+            DomainName: !GetAtt ALB.DNSName
+            CustomOriginConfig:
+              HTTPPort: 80
+              OriginProtocolPolicy: http-only
+              OriginReadTimeout: 60
+              OriginKeepaliveTimeout: 60
+        DefaultCacheBehavior:
+          TargetOriginId: ALBOrigin
+          ViewerProtocolPolicy: https-only
+          AllowedMethods:
+            - GET
+            - HEAD
+            - OPTIONS
+            - PUT
+            - POST
+            - PATCH
+            - DELETE
+          CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad  # CachingDisabled
+          OriginRequestPolicyId: 216adef6-5c7f-47e4-b989-5492eafa07d3  # AllViewer
+        PriceClass: PriceClass_100
+
+  # ===== DynamoDB Tables =====
+
+  CustomersTableResource:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Ref CustomersTable
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: customer_id
+          AttributeType: S
+        - AttributeName: phone_number
+          AttributeType: S
+      KeySchema:
+        - AttributeName: customer_id
+          KeyType: HASH
+      GlobalSecondaryIndexes:
+        - IndexName: phone-index
+          KeySchema:
+            - AttributeName: phone_number
+              KeyType: HASH
+          Projection:
+            ProjectionType: ALL
+
+  PromptsTableResource:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Ref PromptsTable
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: prompt_id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: prompt_id
+          KeyType: HASH
+
+  FlowsTableResource:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Ref FlowsTable
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: flow_id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: flow_id
+          KeyType: HASH
+
+  CallRecordsTableResource:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Ref CallRecordsTable
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: callSid
+          AttributeType: S
+        - AttributeName: status
+          AttributeType: S
+        - AttributeName: startTime
+          AttributeType: S
+      KeySchema:
+        - AttributeName: callSid
+          KeyType: HASH
+      GlobalSecondaryIndexes:
+        - IndexName: status-startTime-index
+          KeySchema:
+            - AttributeName: status
+              KeyType: HASH
+            - AttributeName: startTime
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+
+  ProjectsTableResource:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Ref ProjectsTable
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: project_id
+          AttributeType: S
+        - AttributeName: status
+          AttributeType: S
+        - AttributeName: created_at
+          AttributeType: S
+      KeySchema:
+        - AttributeName: project_id
+          KeyType: HASH
+      GlobalSecondaryIndexes:
+        - IndexName: status-createdAt-index
+          KeySchema:
+            - AttributeName: status
+              KeyType: HASH
+            - AttributeName: created_at
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+
+  LabelConfigsTableResource:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Ref LabelConfigsTable
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: label_id
+          AttributeType: S
+        - AttributeName: project_id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: label_id
+          KeyType: HASH
+      GlobalSecondaryIndexes:
+        - IndexName: project-index
+          KeySchema:
+            - AttributeName: project_id
+              KeyType: HASH
+          Projection:
+            ProjectionType: ALL
+
+  CallLogsTableResource:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Ref CallLogsTable
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: callSid
+          AttributeType: S
+        - AttributeName: timestamp
+          AttributeType: S
+      KeySchema:
+        - AttributeName: callSid
+          KeyType: HASH
+        - AttributeName: timestamp
+          KeyType: RANGE
+      TimeToLiveSpecification:
+        Enabled: true
+        AttributeName: ttl
+
+  UsersTableResource:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Ref UsersTable
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: email
+          AttributeType: S
+      KeySchema:
+        - AttributeName: email
+          KeyType: HASH
+
+  # ===== Lambda =====
+
+  LambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: outbound-lambda-role
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: DynamoDBFullAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                  - dynamodb:PutItem
+                  - dynamodb:UpdateItem
+                  - dynamodb:DeleteItem
+                  - dynamodb:Query
+                  - dynamodb:Scan
+                Resource:
+                  - !GetAtt CustomersTableResource.Arn
+                  - !Sub '${CustomersTableResource.Arn}/index/*'
+                  - !GetAtt PromptsTableResource.Arn
+                  - !Sub '${PromptsTableResource.Arn}/index/*'
+                  - !GetAtt FlowsTableResource.Arn
+                  - !Sub '${FlowsTableResource.Arn}/index/*'
+                  - !GetAtt CallRecordsTableResource.Arn
+                  - !Sub '${CallRecordsTableResource.Arn}/index/*'
+                  - !GetAtt ProjectsTableResource.Arn
+                  - !Sub '${ProjectsTableResource.Arn}/index/*'
+                  - !GetAtt LabelConfigsTableResource.Arn
+                  - !Sub '${LabelConfigsTableResource.Arn}/index/*'
+                  - !GetAtt CallLogsTableResource.Arn
+                  - !Sub '${CallLogsTableResource.Arn}/index/*'
+                  - !GetAtt UsersTableResource.Arn
+                  - !Sub '${UsersTableResource.Arn}/index/*'
+        - PolicyName: ConnectAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - connect:StartOutboundVoiceContact
+                  - connect:SearchContacts
+                  - connect:DescribeContact
+                Resource: '*'
+        - PolicyName: S3Access
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:PutObject
+                  - s3:ListBucket
+                Resource:
+                  - 'arn:aws:s3:::didi-outbound-calls-*'
+                  - 'arn:aws:s3:::didi-outbound-calls-*/*'
+                  - 'arn:aws:s3:::amazon-connect-*'
+                  - 'arn:aws:s3:::amazon-connect-*/*'
+        - PolicyName: BedrockAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - bedrock:InvokeModel
+                Resource: '*'
+        - PolicyName: ECSAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ecs:UpdateService
+                  - ecs:DescribeServices
+                Resource: '*'
+
+  LambdaLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: /aws/lambda/outbound-api
+      RetentionInDays: 30
+
+  LambdaFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: outbound-api
+      Runtime: python3.12
+      Handler: api_lambda_function.lambda_handler
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Timeout: 300
+      MemorySize: 512
+      Environment:
+        Variables:
+          CUSTOMERS_TABLE: !Ref CustomersTable
+          PROMPTS_TABLE: !Ref PromptsTable
+          FLOWS_TABLE: !Ref FlowsTable
+          CALL_RECORDS_TABLE: !Ref CallRecordsTable
+          PROJECTS_TABLE: !Ref ProjectsTable
+          LABEL_CONFIGS_TABLE: !Ref LabelConfigsTable
+          CALL_LOGS_TABLE: !Ref CallLogsTable
+          USERS_TABLE: !Ref UsersTable
+          JWT_SECRET: !Ref JWTSecret
+          INVITE_CODE: !Ref InviteCode
+          DYNAMODB_REGION: !Ref AWS::Region
+          CONNECT_REGION: !Ref ConnectRegion
+          INSTANCE_ID: !Ref ConnectInstanceId
+          ECS_CLUSTER_NAME: !Ref ECSCluster
+          ECS_SERVICE_NAME: !GetAtt ECSService.Name
+          ECS_REGION: !Ref AWS::Region
+      Code:
+        ZipFile: |
+          def lambda_handler(event, context):
+              return {'statusCode': 200, 'body': 'placeholder - deploy real code with deploy.sh'}
+
+  # ===== API Gateway (HTTP API v2) =====
+
+  HttpApi:
+    Type: AWS::ApiGatewayV2::Api
+    Properties:
+      Name: outbound-api
+      ProtocolType: HTTP
+      CorsConfiguration:
+        AllowOrigins:
+          - '*'
+        AllowMethods:
+          - GET
+          - POST
+          - PUT
+          - DELETE
+          - OPTIONS
+        AllowHeaders:
+          - Content-Type
+          - Authorization
+          - X-Amz-Date
+          - X-Api-Key
+          - X-Amz-Security-Token
+        MaxAge: 86400
+
+  HttpApiIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref HttpApi
+      IntegrationType: AWS_PROXY
+      IntegrationUri: !GetAtt LambdaFunction.Arn
+      PayloadFormatVersion: '2.0'
+
+  HttpApiDefaultRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref HttpApi
+      RouteKey: $default
+      Target: !Sub 'integrations/${HttpApiIntegration}'
+
+  HttpApiStage:
+    Type: AWS::ApiGatewayV2::Stage
+    Properties:
+      ApiId: !Ref HttpApi
+      StageName: $default
+      AutoDeploy: true
+
+  LambdaApiPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref LambdaFunction
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub 'arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${HttpApi}/*'
+
+  # ===== Frontend (S3 + CloudFront) =====
+
+  FrontendBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub 'outbound-frontend-${AWS::AccountId}'
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      WebsiteConfiguration:
+        IndexDocument: index.html
+        ErrorDocument: index.html
+
+  FrontendOAC:
+    Type: AWS::CloudFront::OriginAccessControl
+    Properties:
+      OriginAccessControlConfig:
+        Name: !Sub 'outbound-frontend-oac-${AWS::AccountId}'
+        OriginAccessControlOriginType: s3
+        SigningBehavior: always
+        SigningProtocol: sigv4
+
+  FrontendBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref FrontendBucket
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: cloudfront.amazonaws.com
+            Action: s3:GetObject
+            Resource: !Sub '${FrontendBucket.Arn}/*'
+            Condition:
+              StringEquals:
+                'AWS:SourceArn': !Sub 'arn:aws:cloudfront::${AWS::AccountId}:distribution/${FrontendCloudFront}'
+
+  FrontendCloudFront:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+        Enabled: true
+        Comment: Outbound Management Frontend
+        DefaultRootObject: index.html
+        HttpVersion: http2and3
+        Origins:
+          - Id: S3Origin
+            DomainName: !GetAtt FrontendBucket.RegionalDomainName
+            OriginAccessControlId: !Ref FrontendOAC
+            S3OriginConfig:
+              OriginAccessIdentity: ''
+        DefaultCacheBehavior:
+          TargetOriginId: S3Origin
+          ViewerProtocolPolicy: redirect-to-https
+          AllowedMethods:
+            - GET
+            - HEAD
+            - OPTIONS
+          CachePolicyId: 658327ea-f89d-4fab-a63d-7e88639e58f6  # CachingOptimized
+          Compress: true
+        CustomErrorResponses:
+          - ErrorCode: 403
+            ResponseCode: 200
+            ResponsePagePath: /index.html
+            ErrorCachingMinTTL: 10
+          - ErrorCode: 404
+            ResponseCode: 200
+            ResponsePagePath: /index.html
+            ErrorCachingMinTTL: 10
+        PriceClass: PriceClass_100
+
+Outputs:
+  CloudFrontDomain:
+    Description: CloudFront domain name - configure this as Twilio webhook URL
+    Value: !Sub 'https://${CloudFrontDistribution.DomainName}'
+
+  ECRRepositoryUri:
+    Description: ECR repository URI for docker push
+    Value: !Sub '${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/voice-agent-server'
+
+  ALBDnsName:
+    Description: ALB DNS name (internal, used by CloudFront)
+    Value: !GetAtt ALB.DNSName
+
+  ECSClusterName:
+    Description: ECS cluster name
+    Value: !Ref ECSCluster
+
+  ECSServiceName:
+    Description: ECS service name
+    Value: !GetAtt ECSService.Name
+
+  ApiGatewayUrl:
+    Description: API Gateway endpoint URL for Lambda backend
+    Value: !Sub 'https://${HttpApi}.execute-api.${AWS::Region}.amazonaws.com'
+
+  FrontendUrl:
+    Description: Frontend CloudFront URL
+    Value: !Sub 'https://${FrontendCloudFront.DomainName}'
+
+  FrontendBucketName:
+    Description: Frontend S3 bucket name
+    Value: !Ref FrontendBucket
+
+  FrontendDistributionId:
+    Description: Frontend CloudFront distribution ID (for cache invalidation)
+    Value: !Ref FrontendCloudFront
+
+  LambdaFunctionName:
+    Description: Lambda function name
+    Value: !Ref LambdaFunction

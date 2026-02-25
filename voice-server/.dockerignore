@@ -1,0 +1,14 @@
+node_modules
+dist
+.git
+.gitignore
+img
+*.md
+!system-prompt.md
+LICENSE
+.env
+.env.*
+.dockerignore
+Dockerfile
+cloudformation.yaml
+deploy.sh

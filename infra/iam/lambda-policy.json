@@ -1,0 +1,83 @@
+{
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Sid": "S3TranscriptAccess",
+            "Effect": "Allow",
+            "Action": [
+                "s3:GetObject",
+                "s3:PutObject",
+                "s3:ListBucket"
+            ],
+            "Resource": [
+                "arn:aws:s3:::${TRANSCRIPT_BUCKET}",
+                "arn:aws:s3:::${TRANSCRIPT_BUCKET}/*"
+            ]
+        },
+        {
+            "Sid": "ConnectOutboundCall",
+            "Effect": "Allow",
+            "Action": [
+                "connect:StartOutboundVoiceContact",
+                "connect:SearchContacts",
+                "connect:DescribeContact"
+            ],
+            "Resource": [
+                "arn:aws:connect:*:${AWS_ACCOUNT_ID}:instance/${INSTANCE_ID}",
+                "arn:aws:connect:*:${AWS_ACCOUNT_ID}:instance/${INSTANCE_ID}/*"
+            ]
+        },
+        {
+            "Sid": "DynamoDBAccess",
+            "Effect": "Allow",
+            "Action": [
+                "dynamodb:GetItem",
+                "dynamodb:PutItem",
+                "dynamodb:UpdateItem",
+                "dynamodb:DeleteItem",
+                "dynamodb:Query",
+                "dynamodb:Scan"
+            ],
+            "Resource": [
+                "arn:aws:dynamodb:*:${AWS_ACCOUNT_ID}:table/${CUSTOMERS_TABLE}",
+                "arn:aws:dynamodb:*:${AWS_ACCOUNT_ID}:table/${CUSTOMERS_TABLE}/index/*",
+                "arn:aws:dynamodb:*:${AWS_ACCOUNT_ID}:table/${PROMPTS_TABLE}",
+                "arn:aws:dynamodb:*:${AWS_ACCOUNT_ID}:table/${PROMPTS_TABLE}/index/*",
+                "arn:aws:dynamodb:*:${AWS_ACCOUNT_ID}:table/${FLOWS_TABLE}",
+                "arn:aws:dynamodb:*:${AWS_ACCOUNT_ID}:table/${FLOWS_TABLE}/index/*",
+                "arn:aws:dynamodb:*:${AWS_ACCOUNT_ID}:table/${CALL_RECORDS_TABLE}",
+                "arn:aws:dynamodb:*:${AWS_ACCOUNT_ID}:table/${CALL_RECORDS_TABLE}/index/*"
+            ]
+        },
+        {
+            "Sid": "ECSReadOnly",
+            "Effect": "Allow",
+            "Action": [
+                "ecs:DescribeServices",
+                "ecs:DescribeTasks",
+                "ecs:ListTasks"
+            ],
+            "Resource": "*"
+        },
+        {
+            "Sid": "BedrockInvoke",
+            "Effect": "Allow",
+            "Action": [
+                "bedrock:InvokeModel"
+            ],
+            "Resource": "*"
+        },
+        {
+            "Sid": "CloudWatchLogs",
+            "Effect": "Allow",
+            "Action": [
+                "logs:CreateLogGroup",
+                "logs:CreateLogStream",
+                "logs:PutLogEvents"
+            ],
+            "Resource": [
+                "arn:aws:logs:*:${AWS_ACCOUNT_ID}:*"
+            ]
+        }
+    ]
+}

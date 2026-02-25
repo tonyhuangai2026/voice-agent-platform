@@ -1,0 +1,191 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="1200" height="800" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <style>
+      .box { fill: #ffffff; stroke: #333; stroke-width: 2; }
+      .service { fill: #667eea; stroke: #333; stroke-width: 2; }
+      .aws { fill: #FF9900; stroke: #333; stroke-width: 2; }
+      .db { fill: #3b82f6; stroke: #333; stroke-width: 2; }
+      .external { fill: #10b981; stroke: #333; stroke-width: 2; }
+      .text { font-family: Arial, sans-serif; font-size: 14px; fill: #333; }
+      .title { font-family: Arial, sans-serif; font-size: 16px; font-weight: bold; fill: #fff; }
+      .arrow { stroke: #666; stroke-width: 2; fill: none; marker-end: url(#arrowhead); }
+      .label { font-family: Arial, sans-serif; font-size: 12px; fill: #666; }
+    </style>
+    <marker id="arrowhead" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto">
+      <polygon points="0 0, 10 3, 0 6" fill="#666" />
+    </marker>
+  </defs>
+
+  <!-- Title -->
+  <text x="600" y="30" text-anchor="middle" class="text" style="font-size: 24px; font-weight: bold;">Voice Agent Platform - System Architecture</text>
+
+  <!-- User & Browser -->
+  <g id="user">
+    <circle cx="100" cy="100" r="40" class="external"/>
+    <text x="100" y="105" text-anchor="middle" class="title">User</text>
+  </g>
+
+  <!-- Frontend -->
+  <g id="frontend">
+    <rect x="250" y="60" width="200" height="80" rx="10" class="service"/>
+    <text x="350" y="90" text-anchor="middle" class="title">Frontend</text>
+    <text x="350" y="110" text-anchor="middle" class="label" style="fill: #fff;">React + TypeScript</text>
+    <text x="350" y="125" text-anchor="middle" class="label" style="fill: #fff;">Ant Design</text>
+  </g>
+
+  <!-- CloudFront -->
+  <g id="cloudfront">
+    <rect x="250" y="180" width="200" height="60" rx="10" class="aws"/>
+    <text x="350" y="205" text-anchor="middle" class="title">CloudFront</text>
+    <text x="350" y="225" text-anchor="middle" class="label" style="fill: #fff;">CDN + SSL</text>
+  </g>
+
+  <!-- S3 -->
+  <g id="s3">
+    <rect x="500" y="180" width="150" height="60" rx="10" class="aws"/>
+    <text x="575" y="205" text-anchor="middle" class="title">S3</text>
+    <text x="575" y="225" text-anchor="middle" class="label" style="fill: #fff;">Static Hosting</text>
+  </g>
+
+  <!-- API Gateway -->
+  <g id="apigateway">
+    <rect x="250" y="300" width="200" height="80" rx="10" class="aws"/>
+    <text x="350" y="330" text-anchor="middle" class="title">API Gateway</text>
+    <text x="350" y="350" text-anchor="middle" class="label" style="fill: #fff;">REST API</text>
+    <text x="350" y="365" text-anchor="middle" class="label" style="fill: #fff;">Authentication</text>
+  </g>
+
+  <!-- Lambda -->
+  <g id="lambda">
+    <rect x="250" y="420" width="200" height="100" rx="10" class="aws"/>
+    <text x="350" y="450" text-anchor="middle" class="title">Lambda</text>
+    <text x="350" y="470" text-anchor="middle" class="label" style="fill: #fff;">Backend API</text>
+    <text x="350" y="485" text-anchor="middle" class="label" style="fill: #fff;">Python</text>
+    <text x="350" y="500" text-anchor="middle" class="label" style="fill: #fff;">Auth + Business Logic</text>
+  </g>
+
+  <!-- DynamoDB -->
+  <g id="dynamodb">
+    <rect x="500" y="420" width="150" height="100" rx="10" class="db"/>
+    <text x="575" y="450" text-anchor="middle" class="title">DynamoDB</text>
+    <text x="575" y="470" text-anchor="middle" class="label" style="fill: #fff;">Users</text>
+    <text x="575" y="485" text-anchor="middle" class="label" style="fill: #fff;">Customers</text>
+    <text x="575" y="500" text-anchor="middle" class="label" style="fill: #fff;">Call Records</text>
+  </g>
+
+  <!-- ECS / Voice Server -->
+  <g id="ecs">
+    <rect x="700" y="300" width="220" height="150" rx="10" class="service"/>
+    <text x="810" y="330" text-anchor="middle" class="title">ECS Fargate</text>
+    <text x="810" y="355" text-anchor="middle" class="label" style="fill: #fff;">Voice Server</text>
+    <text x="810" y="375" text-anchor="middle" class="label" style="fill: #fff;">Node.js + TypeScript</text>
+    <text x="810" y="395" text-anchor="middle" class="label" style="fill: #fff;">WebSocket Handler</text>
+    <text x="810" y="415" text-anchor="middle" class="label" style="fill: #fff;">Call Logging</text>
+    <text x="810" y="435" text-anchor="middle" class="label" style="fill: #fff;">Real-time Transcript</text>
+  </g>
+
+  <!-- Twilio -->
+  <g id="twilio">
+    <rect x="700" y="100" width="220" height="80" rx="10" class="external"/>
+    <text x="810" y="130" text-anchor="middle" class="title">Twilio</text>
+    <text x="810" y="150" text-anchor="middle" class="label" style="fill: #fff;">Voice Calls</text>
+    <text x="810" y="165" text-anchor="middle" class="label" style="fill: #fff;">Media Streams</text>
+  </g>
+
+  <!-- Bedrock / Nova Sonic -->
+  <g id="bedrock">
+    <rect x="950" y="300" width="200" height="100" rx="10" class="aws"/>
+    <text x="1050" y="330" text-anchor="middle" class="title">Amazon Bedrock</text>
+    <text x="1050" y="355" text-anchor="middle" class="label" style="fill: #fff;">Nova Sonic</text>
+    <text x="1050" y="375" text-anchor="middle" class="label" style="fill: #fff;">Voice-to-Voice AI</text>
+    <text x="1050" y="395" text-anchor="middle" class="label" style="fill: #fff;">Real-time</text>
+  </g>
+
+  <!-- ALB -->
+  <g id="alb">
+    <rect x="700" y="500" width="220" height="60" rx="10" class="aws"/>
+    <text x="810" y="525" text-anchor="middle" class="title">Application Load Balancer</text>
+    <text x="810" y="545" text-anchor="middle" class="label" style="fill: #fff;">WebSocket Support</text>
+  </g>
+
+  <!-- ECR -->
+  <g id="ecr">
+    <rect x="950" y="450" width="150" height="60" rx="10" class="aws"/>
+    <text x="1025" y="475" text-anchor="middle" class="title">ECR</text>
+    <text x="1025" y="495" text-anchor="middle" class="label" style="fill: #fff;">Docker Images</text>
+  </g>
+
+  <!-- Arrows -->
+  <!-- User to Frontend -->
+  <path d="M 140,100 L 250,100" class="arrow"/>
+  <text x="195" y="95" class="label">HTTPS</text>
+
+  <!-- Frontend to CloudFront -->
+  <path d="M 350,140 L 350,180" class="arrow"/>
+
+  <!-- CloudFront to S3 -->
+  <path d="M 450,210 L 500,210" class="arrow"/>
+
+  <!-- Frontend to API Gateway -->
+  <path d="M 350,240 L 350,300" class="arrow"/>
+  <text x="365" y="270" class="label">REST API</text>
+
+  <!-- API Gateway to Lambda -->
+  <path d="M 350,380 L 350,420" class="arrow"/>
+
+  <!-- Lambda to DynamoDB -->
+  <path d="M 450,470 L 500,470" class="arrow"/>
+  <text x="465" y="465" class="label">CRUD</text>
+
+  <!-- Frontend to ECS -->
+  <path d="M 450,100 L 700,375" class="arrow"/>
+  <text x="560" y="220" class="label">WebSocket</text>
+
+  <!-- Twilio to ECS -->
+  <path d="M 810,180 L 810,300" class="arrow"/>
+  <text x="820" y="240" class="label">Media Stream</text>
+
+  <!-- ECS to Bedrock -->
+  <path d="M 920,375 L 950,350" class="arrow"/>
+  <text x="925" y="360" class="label">Audio</text>
+
+  <!-- ECS to DynamoDB -->
+  <path d="M 700,450 L 650,470" class="arrow"/>
+  <text x="660" y="460" class="label">Logs</text>
+
+  <!-- ECS to ALB -->
+  <path d="M 810,450 L 810,500" class="arrow"/>
+
+  <!-- ECR to ECS -->
+  <path d="M 1025,450 L 920,380" class="arrow"/>
+  <text x="960" y="415" class="label">Pull Image</text>
+
+  <!-- Customer Call Flow -->
+  <g id="callflow">
+    <rect x="50" y="620" width="1100" height="150" rx="10" style="fill: #f0f0f0; stroke: #999; stroke-width: 2; stroke-dasharray: 5,5;"/>
+    <text x="600" y="645" text-anchor="middle" class="text" style="font-size: 16px; font-weight: bold;">Call Flow</text>
+
+    <text x="70" y="670" class="label">1. Customer receives call via Twilio</text>
+    <text x="70" y="690" class="label">2. Twilio streams audio to Voice Server (WebSocket)</text>
+    <text x="70" y="710" class="label">3. Voice Server processes with Nova Sonic (real-time voice AI)</text>
+    <text x="70" y="730" class="label">4. AI response streamed back to customer</text>
+    <text x="70" y="750" class="label">5. Call logs and transcripts saved to DynamoDB</text>
+  </g>
+
+  <!-- Legend -->
+  <g id="legend">
+    <text x="50" y="590" class="text" style="font-weight: bold;">Components:</text>
+    <rect x="150" y="575" width="80" height="20" rx="5" class="service"/>
+    <text x="190" y="590" text-anchor="middle" class="label">Application</text>
+
+    <rect x="250" y="575" width="60" height="20" rx="5" class="aws"/>
+    <text x="280" y="590" text-anchor="middle" class="label">AWS</text>
+
+    <rect x="330" y="575" width="70" height="20" rx="5" class="db"/>
+    <text x="365" y="590" text-anchor="middle" class="label">Database</text>
+
+    <rect x="420" y="575" width="70" height="20" rx="5" class="external"/>
+    <text x="455" y="590" text-anchor="middle" class="label">External</text>
+  </g>
+</svg>
