@@ -8,7 +8,9 @@ from datetime import datetime
 from decimal import Decimal
 import boto3
 
-dynamodb = boto3.resource('dynamodb', region_name='us-west-2')
+DYNAMODB_REGION = os.environ.get('DYNAMODB_REGION', 'us-east-1')
+
+dynamodb = boto3.resource('dynamodb', region_name=DYNAMODB_REGION)
 flows_table = dynamodb.Table(os.environ.get('FLOWS_TABLE', 'outbound-flow-configs'))
 
 
@@ -42,6 +44,10 @@ def handle_create_flow(event, cors_headers):
             'updated_at': datetime.utcnow().isoformat()
         }
 
+        # Add project_id if provided
+        if body.get('project_id'):
+            flow_item['project_id'] = body['project_id']
+
         flows_table.put_item(Item=flow_item)
 
         return {
@@ -66,11 +72,23 @@ def handle_list_flows(event, cors_headers):
     try:
         query_params = event.get('queryStringParameters') or {}
         is_active = query_params.get('is_active')
+        project_id = query_params.get('project_id')
 
         scan_kwargs = {}
+        filter_expressions = []
+        expr_values = {}
+
         if is_active:
-            scan_kwargs['FilterExpression'] = 'is_active = :active'
-            scan_kwargs['ExpressionAttributeValues'] = {':active': is_active == 'true'}
+            filter_expressions.append('is_active = :active')
+            expr_values[':active'] = is_active == 'true'
+
+        if project_id:
+            filter_expressions.append('project_id = :project_id')
+            expr_values[':project_id'] = project_id
+
+        if filter_expressions:
+            scan_kwargs['FilterExpression'] = ' AND '.join(filter_expressions)
+            scan_kwargs['ExpressionAttributeValues'] = expr_values
 
         response = flows_table.scan(**scan_kwargs)
 
@@ -78,6 +96,7 @@ def handle_list_flows(event, cors_headers):
         for item in response['Items']:
             flows.append({
                 'flow_id': item['flow_id'],
+                'project_id': item.get('project_id', ''),
                 'flow_name': item['flow_name'],
                 'instance_id': item['instance_id'],
                 'contact_flow_id': item['contact_flow_id'],
@@ -126,6 +145,7 @@ def handle_get_flow(flow_id, cors_headers):
         item = response['Item']
         flow = {
             'flow_id': item['flow_id'],
+            'project_id': item.get('project_id', ''),
             'flow_name': item['flow_name'],
             'instance_id': item['instance_id'],
             'contact_flow_id': item['contact_flow_id'],
@@ -186,6 +206,10 @@ def handle_update_flow(flow_id, event, cors_headers):
             update_expr.append('is_active = :active')
             expr_values[':active'] = body['is_active']
 
+        if 'project_id' in body:
+            update_expr.append('project_id = :project')
+            expr_values[':project'] = body['project_id']
+
         update_expr.append('updated_at = :updated')
         expr_values[':updated'] = datetime.utcnow().isoformat()
 
@@ -211,6 +235,7 @@ def handle_update_flow(flow_id, event, cors_headers):
         item = response['Attributes']
         flow = {
             'flow_id': item['flow_id'],
+            'project_id': item.get('project_id', ''),
             'flow_name': item['flow_name'],
             'instance_id': item['instance_id'],
             'contact_flow_id': item['contact_flow_id'],

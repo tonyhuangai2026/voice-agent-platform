@@ -21,6 +21,7 @@ export function PromptManagement() {
   const fetchPrompts = async () => {
     setLoading(true);
     try {
+      // Don't filter by project for prompts - show all including system defaults
       const data = await listPrompts();
       setPrompts(data.prompts);
     } catch (error) {
@@ -176,7 +177,7 @@ export function PromptManagement() {
   ];
 
   return (
-    <div style={{ padding: '24px' }}>
+    <div>
       <Card>
         <Space direction="vertical" size="large" style={{ width: '100%' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -228,7 +229,7 @@ export function PromptManagement() {
             label="Prompt Name"
             rules={[{ required: true, message: 'Please enter prompt name' }]}
           >
-            <Input placeholder="e.g., Default Outbound Campaign" />
+            <Input placeholder="e.g., Default Outbound Collection" />
           </Form.Item>
           <Form.Item
             name="description"
@@ -298,7 +299,7 @@ export function PromptManagement() {
               <div style={{
                 marginTop: 8,
                 padding: 16,
-                backgroundColor: '#f5f5f5',
+                backgroundColor: '#141414',
                 borderRadius: 4,
                 maxHeight: 500,
                 overflow: 'auto'

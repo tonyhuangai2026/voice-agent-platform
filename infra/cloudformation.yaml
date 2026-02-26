@@ -381,6 +381,11 @@ Resources:
                 Resource:
                   - !Sub 'arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${CallRecordsTable}'
                   - !Sub 'arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${CallRecordsTable}/index/*'
+              - Effect: Allow
+                Action:
+                  - dynamodb:PutItem
+                Resource:
+                  - !GetAtt CallLogsTableResource.Arn
 
   # ===== Application =====
 
@@ -815,8 +820,8 @@ Resources:
                   - s3:PutObject
                   - s3:ListBucket
                 Resource:
-                  - 'arn:aws:s3:::didi-outbound-calls-*'
-                  - 'arn:aws:s3:::didi-outbound-calls-*/*'
+                  - 'arn:aws:s3:::voice-agent-calls-*'
+                  - 'arn:aws:s3:::voice-agent-calls-*/*'
                   - 'arn:aws:s3:::amazon-connect-*'
                   - 'arn:aws:s3:::amazon-connect-*/*'
         - PolicyName: BedrockAccess

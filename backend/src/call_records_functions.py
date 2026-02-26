@@ -1,197 +1,167 @@
 import json
-import os
 import boto3
-from datetime import datetime, timedelta
+import os
 from decimal import Decimal
+from datetime import datetime
 
-CALL_RECORDS_TABLE = os.environ.get('CALL_RECORDS_TABLE', 'outbound-call-records')
-ECS_CLUSTER_NAME = os.environ.get('ECS_CLUSTER_NAME', 'voice-agent-cluster')
-ECS_SERVICE_NAME = os.environ.get('ECS_SERVICE_NAME', 'voice-agent-service')
-
-dynamodb = boto3.resource('dynamodb', region_name='us-west-2')
-call_records_table = dynamodb.Table(CALL_RECORDS_TABLE)
-ecs_client = boto3.client('ecs', region_name='us-west-2')
+dynamodb = boto3.resource('dynamodb', region_name=os.environ.get('DYNAMODB_REGION', 'us-east-1'))
+call_records_table = dynamodb.Table(os.environ.get('CALL_RECORDS_TABLE', 'outbound-call-records'))
 
 
 class DecimalEncoder(json.JSONEncoder):
-    """JSON encoder that handles Decimal types from DynamoDB."""
-    def default(self, obj):
-        if isinstance(obj, Decimal):
-            if obj % 1 == 0:
-                return int(obj)
-            return float(obj)
-        return super().default(obj)
-
-
-def _json_dumps(obj):
-    return json.dumps(obj, cls=DecimalEncoder)
+    def default(self, o):
+        if isinstance(o, Decimal):
+            return int(o) if o == int(o) else float(o)
+        return super().default(o)
 
 
 def handle_list_call_records(event, cors_headers):
-    """List call records from DynamoDB (supports filtering by status and days)."""
+    """
+    GET /api/call-records?limit=20&status=active|completed
+    Reads from DynamoDB outbound-call-records table.
+    Uses GSI status-startTime-index when status filter provided.
+    """
     try:
         query_params = event.get('queryStringParameters') or {}
-        status = query_params.get('status')
-        limit = int(query_params.get('limit', '50'))
-        days = int(query_params.get('days', '7'))
+        limit = int(query_params.get('limit', '20'))
+        status_filter = query_params.get('status')
+        project_id = query_params.get('project_id')
 
-        if status:
-            # Use GSI to query by status
-            cutoff = (datetime.utcnow() - timedelta(days=days)).isoformat()
-            response = call_records_table.query(
-                IndexName='status-startTime-index',
-                KeyConditionExpression='#st = :status AND startTime >= :cutoff',
-                ExpressionAttributeNames={'#st': 'status'},
-                ExpressionAttributeValues={
-                    ':status': status,
-                    ':cutoff': cutoff,
-                },
-                ScanIndexForward=False,
-                Limit=limit,
-            )
+        if status_filter:
+            # Use GSI for status-based query
+            query_kwargs = {
+                'IndexName': 'status-startTime-index',
+                'KeyConditionExpression': '#s = :status',
+                'ExpressionAttributeNames': {'#s': 'status'},
+                'ExpressionAttributeValues': {':status': status_filter},
+                'ScanIndexForward': False,
+                'Limit': limit
+            }
+            # Add project filter if provided
+            if project_id:
+                query_kwargs['FilterExpression'] = 'project_id = :pid'
+                query_kwargs['ExpressionAttributeValues'][':pid'] = project_id
+            response = call_records_table.query(**query_kwargs)
         else:
-            # Scan with time filter
-            cutoff = (datetime.utcnow() - timedelta(days=days)).isoformat()
-            response = call_records_table.scan(
-                FilterExpression='startTime >= :cutoff',
-                ExpressionAttributeValues={':cutoff': cutoff},
-                Limit=min(limit * 3, 300),  # Over-fetch because scan filters client-side
-            )
+            # Scan with limit when no filter
+            scan_kwargs = {'Limit': limit}
+            if project_id:
+                scan_kwargs['FilterExpression'] = 'project_id = :pid'
+                scan_kwargs['ExpressionAttributeValues'] = {':pid': project_id}
+            response = call_records_table.scan(**scan_kwargs)
 
         records = response.get('Items', [])
 
         # Sort by startTime descending
-        records.sort(key=lambda r: r.get('startTime', ''), reverse=True)
-        records = records[:limit]
+        records.sort(key=lambda x: x.get('startTime', ''), reverse=True)
 
-        # Strip full transcript from list view for performance
-        for record in records:
-            transcript = record.get('transcript', [])
-            record['transcriptCount'] = len(transcript)
-            record.pop('transcript', None)
-
-        return {
-            'statusCode': 200,
-            'headers': cors_headers,
-            'body': _json_dumps({'records': records, 'count': len(records)}),
-        }
-    except Exception as e:
-        print(f"Error listing call records: {e}")
-        return {
-            'statusCode': 500,
-            'headers': cors_headers,
-            'body': json.dumps({'error': str(e)}),
-        }
-
-
-def handle_get_call_record(call_sid, cors_headers):
-    """Get a single call record with full transcript."""
-    try:
-        response = call_records_table.get_item(Key={'callSid': call_sid})
-        item = response.get('Item')
-
-        if not item:
-            return {
-                'statusCode': 404,
-                'headers': cors_headers,
-                'body': json.dumps({'error': 'Call record not found'}),
-            }
-
-        return {
-            'statusCode': 200,
-            'headers': cors_headers,
-            'body': _json_dumps(item),
-        }
-    except Exception as e:
-        print(f"Error getting call record {call_sid}: {e}")
-        return {
-            'statusCode': 500,
-            'headers': cors_headers,
-            'body': json.dumps({'error': str(e)}),
-        }
-
-
-def handle_get_ecs_status(cors_headers):
-    """Query ECS service status (running/desired/pending task counts)."""
-    try:
-        response = ecs_client.describe_services(
-            cluster=ECS_CLUSTER_NAME,
-            services=[ECS_SERVICE_NAME],
-        )
-        services = response.get('services', [])
-
-        if not services:
-            return {
-                'statusCode': 200,
-                'headers': cors_headers,
-                'body': json.dumps({
-                    'clusterName': ECS_CLUSTER_NAME,
-                    'serviceName': ECS_SERVICE_NAME,
-                    'runningCount': 0,
-                    'desiredCount': 0,
-                    'pendingCount': 0,
-                }),
-            }
-
-        svc = services[0]
         return {
             'statusCode': 200,
             'headers': cors_headers,
             'body': json.dumps({
-                'clusterName': ECS_CLUSTER_NAME,
-                'serviceName': ECS_SERVICE_NAME,
-                'runningCount': svc.get('runningCount', 0),
-                'desiredCount': svc.get('desiredCount', 0),
-                'pendingCount': svc.get('pendingCount', 0),
-            }),
+                'records': records[:limit],
+                'count': len(records[:limit])
+            }, cls=DecimalEncoder)
         }
     except Exception as e:
-        print(f"Error getting ECS status: {e}")
+        print(f"Error listing call records: {str(e)}")
         return {
             'statusCode': 500,
             'headers': cors_headers,
-            'body': json.dumps({'error': str(e)}),
+            'body': json.dumps({'error': str(e)})
         }
 
 
-def handle_get_active_calls_summary(cors_headers):
-    """Query all active calls from DynamoDB GSI."""
+def handle_delete_call_record(call_sid, cors_headers):
+    """
+    DELETE /api/call-records/{call_sid}
+    Deletes a call record from DynamoDB
+    """
     try:
-        response = call_records_table.query(
-            IndexName='status-startTime-index',
-            KeyConditionExpression='#st = :active',
-            ExpressionAttributeNames={'#st': 'status'},
-            ExpressionAttributeValues={':active': 'active'},
-            ScanIndexForward=False,
+        # Delete the record
+        call_records_table.delete_item(
+            Key={'callSid': call_sid}
         )
-
-        items = response.get('Items', [])
-
-        active_calls = []
-        for item in items:
-            active_calls.append({
-                'callSid': item.get('callSid'),
-                'streamSid': item.get('streamSid'),
-                'customerPhone': item.get('customerPhone'),
-                'customerName': item.get('customerName'),
-                'voiceId': item.get('voiceId'),
-                'startTime': item.get('startTime'),
-                'turnCount': item.get('turnCount', 0),
-                'instanceId': item.get('instanceId'),
-            })
 
         return {
             'statusCode': 200,
             'headers': cors_headers,
-            'body': _json_dumps({
-                'activeCalls': active_calls,
-                'totalActive': len(active_calls),
-            }),
+            'body': json.dumps({
+                'message': 'Call record deleted successfully',
+                'callSid': call_sid
+            })
         }
     except Exception as e:
-        print(f"Error getting active calls summary: {e}")
+        print(f"Error deleting call record: {str(e)}")
         return {
             'statusCode': 500,
             'headers': cors_headers,
-            'body': json.dumps({'error': str(e)}),
+            'body': json.dumps({'error': str(e)})
+        }
+
+
+def handle_update_call_labels(call_sid, event, cors_headers):
+    """
+    PUT /api/call-records/{call_sid}/labels
+    Update labels for a call record
+    Body: { "labels": { "label_id_1": "value", "label_id_2": ["value1", "value2"] } }
+    """
+    try:
+        body = json.loads(event['body'])
+        labels = body.get('labels', {})
+
+        # Update the record
+        call_records_table.update_item(
+            Key={'callSid': call_sid},
+            UpdateExpression='SET labels = :labels, updated_at = :updated_at',
+            ExpressionAttributeValues={
+                ':labels': labels,
+                ':updated_at': datetime.utcnow().isoformat()
+            }
+        )
+
+        return {
+            'statusCode': 200,
+            'headers': cors_headers,
+            'body': json.dumps({
+                'message': 'Labels updated successfully',
+                'callSid': call_sid,
+                'labels': labels
+            }, cls=DecimalEncoder)
+        }
+    except Exception as e:
+        print(f"Error updating call labels: {str(e)}")
+        return {
+            'statusCode': 500,
+            'headers': cors_headers,
+            'body': json.dumps({'error': str(e)})
+        }
+
+
+def handle_get_call_record(call_sid, cors_headers):
+    """
+    GET /api/call-records/{call_sid}
+    Get a specific call record
+    """
+    try:
+        response = call_records_table.get_item(Key={'callSid': call_sid})
+
+        if 'Item' not in response:
+            return {
+                'statusCode': 404,
+                'headers': cors_headers,
+                'body': json.dumps({'error': 'Call record not found'})
+            }
+
+        return {
+            'statusCode': 200,
+            'headers': cors_headers,
+            'body': json.dumps(response['Item'], cls=DecimalEncoder)
+        }
+    except Exception as e:
+        print(f"Error getting call record: {str(e)}")
+        return {
+            'statusCode': 500,
+            'headers': cors_headers,
+            'body': json.dumps({'error': str(e)})
         }

@@ -5,11 +5,13 @@ import type { ColumnsType } from 'antd/es/table';
 import dayjs from 'dayjs';
 import { listFlows, createFlow, updateFlow, deleteFlow } from '../api';
 import type { FlowConfig } from '../types';
+import { useProject } from '../contexts/ProjectContext';
 
 const { Title, Text } = Typography;
 const { TextArea } = Input;
 
 export function FlowManagement() {
+  const { currentProject } = useProject();
   const [flows, setFlows] = useState<FlowConfig[]>([]);
   const [loading, setLoading] = useState(false);
   const [modalVisible, setModalVisible] = useState(false);
@@ -19,7 +21,7 @@ export function FlowManagement() {
   const fetchFlows = async () => {
     setLoading(true);
     try {
-      const data = await listFlows();
+      const data = await listFlows(undefined, currentProject?.project_id);
       setFlows(data.flows);
     } catch (error) {
       console.error('Failed to fetch flows:', error);
@@ -31,7 +33,7 @@ export function FlowManagement() {
 
   useEffect(() => {
     fetchFlows();
-  }, []);
+  }, [currentProject]);
 
   const handleCreate = () => {
     setEditingFlow(null);
@@ -61,8 +63,11 @@ export function FlowManagement() {
         await updateFlow(editingFlow.flow_id, values);
         message.success('Flow updated');
       } else {
-        // Create new flow
-        await createFlow(values);
+        // Create new flow with current project_id
+        await createFlow({
+          ...values,
+          project_id: currentProject?.project_id || ''
+        });
         message.success('Flow created');
       }
 
@@ -221,7 +226,7 @@ export function FlowManagement() {
             label="Amazon Connect Instance ID"
             rules={[{ required: true, message: 'Please enter instance ID' }]}
           >
-            <Input placeholder="e.g., xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" />
+            <Input placeholder="e.g., a60dd182-7f8f-495b-945e-43420832f01c" />
           </Form.Item>
 
           <Form.Item

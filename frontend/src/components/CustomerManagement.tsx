@@ -1,36 +1,41 @@
 import { useState, useEffect } from 'react';
-import { Card, Table, Button, Select, Space, Typography, Tag, message, Modal, Form, Input, InputNumber, Popconfirm, Alert } from 'antd';
-import { ReloadOutlined, PhoneOutlined, UserOutlined, DeleteOutlined, EditOutlined, UploadOutlined, CheckCircleOutlined } from '@ant-design/icons';
+import { Card, Table, Button, Select, Space, Typography, Tag, message, Modal, Form, Input, Popconfirm } from 'antd';
+import { ReloadOutlined, PhoneOutlined, UserOutlined, DeleteOutlined, EditOutlined, PlusOutlined, UploadOutlined, TagsOutlined } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
 import dayjs from 'dayjs';
-import { listCustomers, deleteCustomer, makeCall, makeBatchCall, updateCustomer, importCustomers, listFlows, listPrompts } from '../api';
-import type { Customer, FlowConfig, PromptConfig } from '../types';
+import { listCustomers, deleteCustomer, makeCall, makeBatchCall, updateCustomer, importCustomers, listFlows, listPrompts, listLabels } from '../api';
+import type { Customer, FlowConfig, PromptConfig, LabelConfig, CallLabels } from '../types';
+import { useProject } from '../contexts/ProjectContext';
 
 const { Title, Text } = Typography;
 const { TextArea } = Input;
 
 export function CustomerManagement() {
+  const { currentProject } = useProject();
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [loading, setLoading] = useState(false);
   const [statusFilter, setStatusFilter] = useState<string | undefined>();
   const [selectedRowKeys, setSelectedRowKeys] = useState<string[]>([]);
+  const [createModalVisible, setCreateModalVisible] = useState(false);
   const [editModalVisible, setEditModalVisible] = useState(false);
   const [importModalVisible, setImportModalVisible] = useState(false);
   const [callModalVisible, setCallModalVisible] = useState(false);
   const [batchCallModalVisible, setBatchCallModalVisible] = useState(false);
   const [editingCustomer, setEditingCustomer] = useState<Customer | null>(null);
   const [callingCustomerId, setCallingCustomerId] = useState<string | null>(null);
-  const [form] = Form.useForm();
+  const [createForm] = Form.useForm();
+  const [editForm] = Form.useForm();
   const [csvContent, setCsvContent] = useState('');
   const [flows, setFlows] = useState<FlowConfig[]>([]);
   const [selectedFlowId, setSelectedFlowId] = useState<string>('');
   const [batchSelectedFlowId, setBatchSelectedFlowId] = useState<string>('');
   const [prompts, setPrompts] = useState<PromptConfig[]>([]);
+  const [labelConfigs, setLabelConfigs] = useState<LabelConfig[]>([]);
 
   const fetchCustomers = async () => {
     setLoading(true);
     try {
-      const data = await listCustomers(statusFilter);
+      const data = await listCustomers(statusFilter, 100, currentProject?.project_id);
       setCustomers(data.customers);
     } catch (error) {
       console.error('Failed to fetch customers:', error);
@@ -42,7 +47,7 @@ export function CustomerManagement() {
 
   const fetchFlows = async () => {
     try {
-      const data = await listFlows(true);
+      const data = await listFlows(true, currentProject?.project_id);
       setFlows(data.flows);
     } catch (error) {
       console.error('Failed to fetch flows:', error);
@@ -51,6 +56,7 @@ export function CustomerManagement() {
 
   const fetchPrompts = async () => {
     try {
+      // Load all prompts including system defaults (no project filter)
       const data = await listPrompts(true);
       setPrompts(data.prompts);
     } catch (error) {
@@ -58,11 +64,22 @@ export function CustomerManagement() {
     }
   };
 
+  const fetchLabelConfigs = async () => {
+    if (!currentProject) return;
+    try {
+      const data = await listLabels(currentProject.project_id, true);
+      setLabelConfigs(data.labels);
+    } catch (error) {
+      console.error('Failed to fetch label configs:', error);
+    }
+  };
+
   useEffect(() => {
     fetchCustomers();
     fetchFlows();
     fetchPrompts();
-  }, [statusFilter]);
+    fetchLabelConfigs();
+  }, [statusFilter, currentProject]);
 
   const handleDelete = async (customerId: string) => {
     try {
@@ -71,6 +88,52 @@ export function CustomerManagement() {
       fetchCustomers();
     } catch (error) {
       message.error('Failed to delete customer');
+    }
+  };
+
+  const handleCreate = () => {
+    createForm.resetFields();
+    setCreateModalVisible(true);
+  };
+
+  const handleCreateSubmit = async () => {
+    try {
+      const values = await createForm.validateFields();
+      // Use import with single-row CSV, passing current project_id
+      const csvData = `customer_name,phone_number,email,notes,voice_id,prompt_id\n${values.customer_name},${values.phone_number},${values.email || ''},${values.notes || ''},${values.voice_id || ''},${values.prompt_id || ''}`;
+      await importCustomers(csvData, currentProject?.project_id);
+      message.success('Customer created');
+      setCreateModalVisible(false);
+      fetchCustomers();
+    } catch (error) {
+      message.error('Failed to create customer');
+    }
+  };
+
+  const handleEdit = (customer: Customer) => {
+    setEditingCustomer(customer);
+    editForm.setFieldsValue({
+      customer_name: customer.customer_name,
+      phone_number: customer.phone_number,
+      email: customer.email,
+      notes: customer.notes,
+      voice_id: customer.voice_id,
+      prompt_id: customer.prompt_id
+    });
+    setEditModalVisible(true);
+  };
+
+  const handleEditSubmit = async () => {
+    if (!editingCustomer) return;
+
+    try {
+      const values = await editForm.validateFields();
+      await updateCustomer(editingCustomer.customer_id, values);
+      message.success('Customer updated');
+      setEditModalVisible(false);
+      fetchCustomers();
+    } catch (error) {
+      message.error('Failed to update customer');
     }
   };
 
@@ -134,33 +197,6 @@ export function CustomerManagement() {
     }
   };
 
-  const handleEdit = (customer: Customer) => {
-    setEditingCustomer(customer);
-    form.setFieldsValue({
-      customer_name: customer.customer_name,
-      phone_number: customer.phone_number,
-      debt_amount: customer.debt_amount,
-      notes: customer.notes,
-      voice_id: customer.voice_id,
-      prompt_id: customer.prompt_id
-    });
-    setEditModalVisible(true);
-  };
-
-  const handleEditSubmit = async () => {
-    if (!editingCustomer) return;
-
-    try {
-      const values = await form.validateFields();
-      await updateCustomer(editingCustomer.customer_id, values);
-      message.success('Customer updated');
-      setEditModalVisible(false);
-      fetchCustomers();
-    } catch (error) {
-      message.error('Failed to update customer');
-    }
-  };
-
   const handleImport = async () => {
     if (!csvContent.trim()) {
       message.error('Please paste CSV content');
@@ -168,7 +204,7 @@ export function CustomerManagement() {
     }
 
     try {
-      const result = await importCustomers(csvContent);
+      const result = await importCustomers(csvContent, currentProject?.project_id);
       message.success(`Imported: ${result.imported}, Updated: ${result.updated}, Skipped: ${result.skipped}`);
       setImportModalVisible(false);
       setCsvContent('');
@@ -183,15 +219,10 @@ export function CustomerManagement() {
       'pending': 'default',
       'calling': 'processing',
       'called': 'success',
+      'completed': 'cyan',
       'failed': 'error'
     };
-    const labelMap: Record<string, string> = {
-      'pending': 'Pending',
-      'calling': 'Calling',
-      'called': 'Called',
-      'failed': 'Failed'
-    };
-    return <Tag color={colorMap[status]}>{labelMap[status] || status}</Tag>;
+    return <Tag color={colorMap[status]}>{status.charAt(0).toUpperCase() + status.slice(1)}</Tag>;
   };
 
   const columns: ColumnsType<Customer> = [
@@ -210,18 +241,13 @@ export function CustomerManagement() {
       title: 'Phone',
       dataIndex: 'phone_number',
       key: 'phone_number',
-      render: (phone: string) => (
-        <Text code>{phone}</Text>
-      ),
+      render: (phone: string) => <Text code>{phone}</Text>,
     },
     {
-      title: 'Debt',
-      dataIndex: 'debt_amount',
-      key: 'debt_amount',
-      render: (amount: number) => (
-        <Tag color="red">${amount}</Tag>
-      ),
-      sorter: (a, b) => a.debt_amount - b.debt_amount,
+      title: 'Email',
+      dataIndex: 'email',
+      key: 'email',
+      render: (email: string) => <Text type="secondary">{email || '-'}</Text>,
     },
     {
       title: 'Status',
@@ -232,6 +258,7 @@ export function CustomerManagement() {
         { text: 'Pending', value: 'pending' },
         { text: 'Calling', value: 'calling' },
         { text: 'Called', value: 'called' },
+        { text: 'Completed', value: 'completed' },
         { text: 'Failed', value: 'failed' },
       ],
       onFilter: (value, record) => record.status === value,
@@ -240,321 +267,378 @@ export function CustomerManagement() {
       title: 'Calls',
       dataIndex: 'call_count',
       key: 'call_count',
-      render: (count: number) => <Tag>{count}</Tag>,
+      render: (count: number) => <Tag color="blue">{count || 0}</Tag>,
     },
     {
       title: 'Last Call',
       dataIndex: 'last_call_time',
       key: 'last_call_time',
-      render: (time: string) => (
-        time ? dayjs(time).format('MM-DD HH:mm') : <Text type="secondary">Never</Text>
-      ),
+      render: (time: string) => time ? dayjs(time).format('YYYY-MM-DD HH:mm') : '-',
     },
     {
-      title: 'Voice ID',
-      dataIndex: 'voice_id',
-      key: 'voice_id',
-      render: (voiceId: string) => (
-        voiceId ? <Text type="secondary" style={{ fontSize: '12px' }}>{voiceId}</Text> : <Text type="secondary">-</Text>
-      ),
-    },
-    {
-      title: 'System Prompt',
-      dataIndex: 'prompt_id',
-      key: 'prompt_id',
-      render: (promptId: string) => {
-        if (!promptId) return <Text type="secondary">-</Text>;
-        const prompt = prompts.find(p => p.prompt_id === promptId);
-        return prompt ? <Text style={{ fontSize: '12px' }}>{prompt.prompt_name}</Text> : <Text type="secondary">Unknown</Text>;
+      title: 'Labels',
+      dataIndex: 'latest_call_labels',
+      key: 'latest_call_labels',
+      width: 250,
+      render: (labels: CallLabels) => {
+        if (!labels || Object.keys(labels).length === 0) {
+          return <Text type="secondary">-</Text>;
+        }
+        const labelTags: any[] = [];
+        Object.entries(labels).forEach(([labelId, value]) => {
+          const config = labelConfigs.find(c => c.label_id === labelId);
+          if (config) {
+            if (Array.isArray(value)) {
+              value.forEach(v => labelTags.push(
+                <Tag key={`${labelId}-${v}`} color="purple" icon={<TagsOutlined />}>
+                  {config.label_name}: {v}
+                </Tag>
+              ));
+            } else {
+              labelTags.push(
+                <Tag key={labelId} color="blue" icon={<TagsOutlined />}>
+                  {config.label_name}: {value}
+                </Tag>
+              );
+            }
+          }
+        });
+        return <Space wrap size="small">{labelTags}</Space>;
       },
     },
     {
       title: 'Notes',
       dataIndex: 'notes',
       key: 'notes',
-      render: (notes: string) => (
-        notes ? (
-          <Text ellipsis style={{ maxWidth: 200 }} title={notes}>
-            {notes}
-          </Text>
-        ) : <Text type="secondary">-</Text>
-      ),
+      ellipsis: true,
+      render: (notes: string) => <Text type="secondary">{notes || '-'}</Text>,
     },
     {
       title: 'Actions',
       key: 'actions',
       render: (_, record) => (
-        <Space>
+        <Space size="small">
           <Button
-            type="primary"
+            type="link"
             size="small"
             icon={<PhoneOutlined />}
             onClick={() => handleCallClick(record.customer_id)}
-            disabled={record.status === 'calling'}
           >
             Call
           </Button>
           <Button
+            type="link"
             size="small"
             icon={<EditOutlined />}
             onClick={() => handleEdit(record)}
-          >
-            Edit
-          </Button>
+          />
           <Popconfirm
-            title="Delete this customer?"
+            title="Delete customer?"
             onConfirm={() => handleDelete(record.customer_id)}
-            okText="Yes"
-            cancelText="No"
           >
-            <Button size="small" danger icon={<DeleteOutlined />}>
-              Delete
-            </Button>
+            <Button type="link" size="small" danger icon={<DeleteOutlined />} />
           </Popconfirm>
         </Space>
       ),
     },
   ];
 
-  const rowSelection = {
-    selectedRowKeys,
-    onChange: (newSelectedRowKeys: React.Key[]) => {
-      setSelectedRowKeys(newSelectedRowKeys as string[]);
-    },
-  };
-
   return (
-    <Card>
-      <Space direction="vertical" style={{ width: '100%' }} size="middle">
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <Title level={4} style={{ margin: 0 }}>
-            <UserOutlined style={{ marginRight: 8 }} />
-            Customer Management
-          </Title>
+    <div>
+      <Card
+        className="glass-card"
+        title={
+          <Space>
+            <UserOutlined />
+            <Title level={4} style={{ margin: 0 }}>Customer Management</Title>
+          </Space>
+        }
+        extra={
           <Space>
             <Select
-              value={statusFilter}
-              onChange={setStatusFilter}
-              style={{ width: 150 }}
-              allowClear
               placeholder="Filter by status"
+              allowClear
+              style={{ width: 150 }}
+              onChange={setStatusFilter}
               options={[
-                { value: 'pending', label: 'Pending' },
-                { value: 'calling', label: 'Calling' },
-                { value: 'called', label: 'Called' },
-                { value: 'failed', label: 'Failed' },
+                { label: 'Pending', value: 'pending' },
+                { label: 'Calling', value: 'calling' },
+                { label: 'Called', value: 'called' },
+                { label: 'Completed', value: 'completed' },
+                { label: 'Failed', value: 'failed' },
               ]}
             />
+            <Button icon={<ReloadOutlined />} onClick={fetchCustomers}>
+              Refresh
+            </Button>
+            <Button
+              type="primary"
+              icon={<PlusOutlined />}
+              onClick={handleCreate}
+            >
+              Add Customer
+            </Button>
             <Button
               icon={<UploadOutlined />}
               onClick={() => setImportModalVisible(true)}
             >
               Import CSV
             </Button>
-            <Button
-              type="primary"
-              icon={<PhoneOutlined />}
-              onClick={handleBatchCallClick}
-              disabled={selectedRowKeys.length === 0}
-            >
-              Batch Call ({selectedRowKeys.length})
-            </Button>
-            <Button
-              icon={<ReloadOutlined />}
-              onClick={fetchCustomers}
-              loading={loading}
-            >
-              Refresh
-            </Button>
+            {selectedRowKeys.length > 0 && (
+              <Button
+                type="primary"
+                icon={<PhoneOutlined />}
+                onClick={handleBatchCallClick}
+              >
+                Call Selected ({selectedRowKeys.length})
+              </Button>
+            )}
           </Space>
-        </div>
-
+        }
+      >
         <Table
           columns={columns}
           dataSource={customers}
           rowKey="customer_id"
           loading={loading}
-          rowSelection={rowSelection}
+          rowSelection={{
+            selectedRowKeys,
+            onChange: (keys) => setSelectedRowKeys(keys as string[]),
+          }}
           pagination={{
             pageSize: 20,
             showSizeChanger: true,
             showTotal: (total) => `Total ${total} customers`,
           }}
-          size="small"
         />
-      </Space>
+      </Card>
 
-      {/* Edit Modal */}
+      {/* Create Customer Modal */}
       <Modal
-        title="Edit Customer"
-        open={editModalVisible}
-        onOk={handleEditSubmit}
-        onCancel={() => setEditModalVisible(false)}
+        title="Add New Customer"
+        open={createModalVisible}
+        onOk={handleCreateSubmit}
+        onCancel={() => setCreateModalVisible(false)}
+        width={600}
       >
-        <Form form={form} layout="vertical">
+        <Form form={createForm} layout="vertical" style={{ marginTop: 24 }}>
           <Form.Item
             name="customer_name"
             label="Customer Name"
             rules={[{ required: true, message: 'Please enter customer name' }]}
           >
-            <Input />
+            <Input placeholder="John Doe" />
           </Form.Item>
+
           <Form.Item
             name="phone_number"
             label="Phone Number"
             rules={[{ required: true, message: 'Please enter phone number' }]}
           >
-            <Input />
+            <Input placeholder="+1234567890" />
           </Form.Item>
-          <Form.Item
-            name="debt_amount"
-            label="Debt Amount"
-            rules={[{ required: true, message: 'Please enter debt amount' }]}
-          >
-            <InputNumber style={{ width: '100%' }} min={0} />
+
+          <Form.Item name="email" label="Email Address">
+            <Input placeholder="john@example.com" type="email" />
           </Form.Item>
+
           <Form.Item name="notes" label="Notes">
-            <TextArea rows={3} />
+            <TextArea
+              rows={3}
+              placeholder="Additional information about this customer"
+            />
           </Form.Item>
-          <Form.Item name="voice_id" label="Voice ID">
-            <Select placeholder="Select voice" allowClear>
-              <Select.Option value="tiffany">Tiffany (en-US, Female)</Select.Option>
-              <Select.Option value="matthew">Matthew (en-US, Male)</Select.Option>
-              <Select.Option value="amy">Amy (en-GB, Female)</Select.Option>
-              <Select.Option value="olivia">Olivia (en-AU, Female)</Select.Option>
-              <Select.Option value="kiara">Kiara (en-IN/hi-IN, Female)</Select.Option>
-              <Select.Option value="arjun">Arjun (en-IN/hi-IN, Male)</Select.Option>
-              <Select.Option value="ambre">Ambre (fr-FR, Female)</Select.Option>
-              <Select.Option value="florian">Florian (fr-FR, Male)</Select.Option>
-              <Select.Option value="beatrice">Beatrice (it-IT, Female)</Select.Option>
-              <Select.Option value="lorenzo">Lorenzo (it-IT, Male)</Select.Option>
-              <Select.Option value="tina">Tina (de-DE, Female)</Select.Option>
-              <Select.Option value="lennart">Lennart (de-DE, Male)</Select.Option>
-              <Select.Option value="lupe">Lupe (es-US, Female)</Select.Option>
-              <Select.Option value="carlos">Carlos (es-US, Male)</Select.Option>
-              <Select.Option value="carolina">Carolina (pt-BR, Female)</Select.Option>
-              <Select.Option value="leo">Leo (pt-BR, Male)</Select.Option>
-            </Select>
+
+          <Form.Item name="voice_id" label="Voice ID (Optional)">
+            <Select
+              placeholder="Select voice"
+              allowClear
+              showSearch
+              options={[
+                { label: 'Tiffany - English US (Female)', value: 'tiffany' },
+                { label: 'Matthew - English US (Male)', value: 'matthew' },
+                { label: 'Amy - English UK (Female)', value: 'amy' },
+                { label: 'Olivia - English AU (Female)', value: 'olivia' },
+                { label: 'Kiara - English IN (Female)', value: 'kiara' },
+                { label: 'Arjun - English IN (Male)', value: 'arjun' },
+                { label: 'Ambre - French (Female)', value: 'ambre' },
+                { label: 'Florian - French (Male)', value: 'florian' },
+                { label: 'Beatrice - Italian (Female)', value: 'beatrice' },
+                { label: 'Lorenzo - Italian (Male)', value: 'lorenzo' },
+                { label: 'Tina - German (Female)', value: 'tina' },
+                { label: 'Lennart - German (Male)', value: 'lennart' },
+                { label: 'Lupe - Spanish US (Female)', value: 'lupe' },
+                { label: 'Carlos - Spanish US (Male)', value: 'carlos' },
+                { label: 'Carolina - Portuguese BR (Female)', value: 'carolina' },
+                { label: 'Leo - Portuguese BR (Male)', value: 'leo' },
+              ]}
+            />
           </Form.Item>
-          <Form.Item name="prompt_id" label="System Prompt">
-            <Select placeholder="Select prompt template" allowClear>
-              {prompts.map(prompt => (
-                <Select.Option key={prompt.prompt_id} value={prompt.prompt_id}>
-                  {prompt.prompt_name}
-                </Select.Option>
-              ))}
-            </Select>
+
+          <Form.Item name="prompt_id" label="Prompt Template (Optional)">
+            <Select
+              placeholder="Select prompt"
+              allowClear
+              options={prompts.map(p => ({
+                label: p.prompt_name,
+                value: p.prompt_id
+              }))}
+            />
           </Form.Item>
         </Form>
       </Modal>
 
-      {/* Import Modal */}
+      {/* Edit Customer Modal */}
+      <Modal
+        title="Edit Customer"
+        open={editModalVisible}
+        onOk={handleEditSubmit}
+        onCancel={() => setEditModalVisible(false)}
+        width={600}
+      >
+        <Form form={editForm} layout="vertical" style={{ marginTop: 24 }}>
+          <Form.Item
+            name="customer_name"
+            label="Customer Name"
+            rules={[{ required: true }]}
+          >
+            <Input />
+          </Form.Item>
+
+          <Form.Item
+            name="phone_number"
+            label="Phone Number"
+            rules={[{ required: true }]}
+          >
+            <Input />
+          </Form.Item>
+
+          <Form.Item name="email" label="Email Address">
+            <Input type="email" />
+          </Form.Item>
+
+          <Form.Item name="notes" label="Notes">
+            <TextArea rows={3} />
+          </Form.Item>
+
+          <Form.Item name="voice_id" label="Voice ID">
+            <Select
+              allowClear
+              showSearch
+              options={[
+                { label: 'Tiffany - English US (Female)', value: 'tiffany' },
+                { label: 'Matthew - English US (Male)', value: 'matthew' },
+                { label: 'Amy - English UK (Female)', value: 'amy' },
+                { label: 'Olivia - English AU (Female)', value: 'olivia' },
+                { label: 'Kiara - English IN (Female)', value: 'kiara' },
+                { label: 'Arjun - English IN (Male)', value: 'arjun' },
+                { label: 'Ambre - French (Female)', value: 'ambre' },
+                { label: 'Florian - French (Male)', value: 'florian' },
+                { label: 'Beatrice - Italian (Female)', value: 'beatrice' },
+                { label: 'Lorenzo - Italian (Male)', value: 'lorenzo' },
+                { label: 'Tina - German (Female)', value: 'tina' },
+                { label: 'Lennart - German (Male)', value: 'lennart' },
+                { label: 'Lupe - Spanish US (Female)', value: 'lupe' },
+                { label: 'Carlos - Spanish US (Male)', value: 'carlos' },
+                { label: 'Carolina - Portuguese BR (Female)', value: 'carolina' },
+                { label: 'Leo - Portuguese BR (Male)', value: 'leo' },
+              ]}
+            />
+          </Form.Item>
+
+          <Form.Item name="prompt_id" label="Prompt Template">
+            <Select
+              allowClear
+              options={prompts.map(p => ({
+                label: p.prompt_name,
+                value: p.prompt_id
+              }))}
+            />
+          </Form.Item>
+        </Form>
+      </Modal>
+
+      {/* Import CSV Modal */}
       <Modal
         title="Import Customers from CSV"
         open={importModalVisible}
         onOk={handleImport}
         onCancel={() => setImportModalVisible(false)}
-        width={600}
+        width={700}
       >
-        <Space direction="vertical" style={{ width: '100%' }}>
-          <Text>Paste your CSV content below:</Text>
-          <Text type="secondary" code>
-            customer_name,phone_number,debt_amount
-          </Text>
-          <TextArea
-            rows={10}
-            value={csvContent}
-            onChange={(e) => setCsvContent(e.target.value)}
-            placeholder="customer_name,phone_number,debt_amount&#10;John Doe,+1234567890,1000&#10;Jane Smith,+9876543210,500"
-          />
-          <Text type="secondary">
-            <CheckCircleOutlined style={{ color: 'green', marginRight: 4 }} />
-            Duplicate phone numbers will be updated automatically
-          </Text>
+        <Space direction="vertical" size="large" style={{ width: '100%' }}>
+          <div>
+            <Title level={5}>CSV Format</Title>
+            <Text type="secondary">
+              Paste your CSV content below. Required columns:
+            </Text>
+            <pre style={{
+              background: '#f5f5f5',
+              padding: 12,
+              borderRadius: 4,
+              marginTop: 8,
+              fontSize: 12
+            }}>
+customer_name,phone_number,email,notes,voice_id,prompt_id
+John Doe,+1234567890,john@example.com,VIP customer,tiffany,prompt-id-123
+Jane Smith,+0987654321,jane@example.com,Follow up next week,matthew,
+            </pre>
+          </div>
+
+          <Form.Item label="CSV Content">
+            <TextArea
+              rows={10}
+              placeholder="Paste CSV content here..."
+              value={csvContent}
+              onChange={(e) => setCsvContent(e.target.value)}
+            />
+          </Form.Item>
         </Space>
       </Modal>
 
-      {/* Single Call Flow Selection Modal */}
+      {/* Single Call Modal */}
       <Modal
-        title="Select Flow for Call"
+        title="Initiate Call"
         open={callModalVisible}
         onOk={handleCall}
         onCancel={() => setCallModalVisible(false)}
-        okText="Make Call"
-        okButtonProps={{ disabled: !selectedFlowId }}
       >
-        <Space direction="vertical" style={{ width: '100%' }}>
-          <Alert
-            message="Flow Selection Required"
-            description="You must select a contact flow before making the call."
-            type="info"
-            showIcon
-          />
-          <Text strong>Select Contact Flow:</Text>
-          <Select
-            style={{ width: '100%' }}
-            placeholder="Choose a flow"
-            value={selectedFlowId}
-            onChange={setSelectedFlowId}
-            options={flows.map(flow => ({
-              value: flow.flow_id,
-              label: flow.flow_name,
-              description: flow.description
-            }))}
-            optionRender={(option) => (
-              <Space direction="vertical" size={0}>
-                <Text strong>{option.data.label}</Text>
-                {option.data.description && (
-                  <Text type="secondary" style={{ fontSize: '12px' }}>
-                    {option.data.description}
-                  </Text>
-                )}
-              </Space>
-            )}
-          />
-        </Space>
+        <Form layout="vertical">
+          <Form.Item label="Select Flow">
+            <Select
+              placeholder="Choose a call flow"
+              value={selectedFlowId}
+              onChange={setSelectedFlowId}
+              options={flows.map(f => ({
+                label: f.flow_name,
+                value: f.flow_id
+              }))}
+            />
+          </Form.Item>
+        </Form>
       </Modal>
 
-      {/* Batch Call Flow Selection Modal */}
+      {/* Batch Call Modal */}
       <Modal
-        title={`Batch Call - ${selectedRowKeys.length} Customers`}
+        title={`Batch Call (${selectedRowKeys.length} customers)`}
         open={batchCallModalVisible}
         onOk={handleBatchCall}
         onCancel={() => setBatchCallModalVisible(false)}
-        okText="Start Batch Calls"
-        okButtonProps={{ disabled: !batchSelectedFlowId }}
       >
-        <Space direction="vertical" style={{ width: '100%' }}>
-          <Alert
-            message="Batch Call Confirmation"
-            description={`You are about to call ${selectedRowKeys.length} customers. All calls will use the same contact flow.`}
-            type="warning"
-            showIcon
-          />
-          <Text strong>Select Contact Flow:</Text>
-          <Select
-            style={{ width: '100%' }}
-            placeholder="Choose a flow"
-            value={batchSelectedFlowId}
-            onChange={setBatchSelectedFlowId}
-            options={flows.map(flow => ({
-              value: flow.flow_id,
-              label: flow.flow_name,
-              description: flow.description
-            }))}
-            optionRender={(option) => (
-              <Space direction="vertical" size={0}>
-                <Text strong>{option.data.label}</Text>
-                {option.data.description && (
-                  <Text type="secondary" style={{ fontSize: '12px' }}>
-                    {option.data.description}
-                  </Text>
-                )}
-              </Space>
-            )}
-          />
-        </Space>
+        <Form layout="vertical">
+          <Form.Item label="Select Flow">
+            <Select
+              placeholder="Choose a call flow"
+              value={batchSelectedFlowId}
+              onChange={setBatchSelectedFlowId}
+              options={flows.map(f => ({
+                label: f.flow_name,
+                value: f.flow_id
+              }))}
+            />
+          </Form.Item>
+        </Form>
       </Modal>
-    </Card>
+    </div>
   );
 }

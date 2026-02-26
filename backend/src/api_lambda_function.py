@@ -25,83 +25,69 @@ from prompt_config_functions import (
     handle_update_prompt, handle_delete_prompt
 )
 from call_records_functions import (
-    handle_list_call_records, handle_get_call_record,
-    handle_get_ecs_status, handle_get_active_calls_summary
+    handle_list_call_records, handle_delete_call_record,
+    handle_update_call_labels, handle_get_call_record
 )
+from project_functions import (
+    handle_create_project, handle_list_projects, handle_get_project,
+    handle_update_project, handle_delete_project, handle_get_project_stats
+)
+from label_config_functions import (
+    handle_list_labels, handle_get_label, handle_create_label,
+    handle_update_label, handle_delete_label
+)
+from auto_label_functions import handle_auto_label_call
+from call_logs_functions import handle_get_call_logs
+from auth_functions import handle_register, handle_login, handle_verify, verify_auth_middleware
 
 # Initialize AWS clients
+DYNAMODB_REGION = os.environ.get('DYNAMODB_REGION', 'us-east-1')
+CONNECT_REGION = os.environ.get('CONNECT_REGION', 'us-west-2')
+
 s3_client = boto3.client('s3', config=Config(signature_version='s3v4'))
-connect_client = boto3.client('connect', region_name='us-west-2')
-bedrock_client = boto3.client('bedrock-runtime', region_name='us-west-2')
-dynamodb = boto3.resource('dynamodb', region_name='us-west-2')
+connect_client = boto3.client('connect', region_name=CONNECT_REGION)
+bedrock_client = boto3.client('bedrock-runtime', region_name=CONNECT_REGION)
+dynamodb = boto3.resource('dynamodb', region_name=DYNAMODB_REGION)
 customers_table = dynamodb.Table(os.environ.get('CUSTOMERS_TABLE', 'outbound-customers'))
 
 # Label definitions
-OUTCOME_TAGS = {
-    'A': {'label': 'Already paid'},
-    'B': {'label': 'Promised to pay on time'},
-    'C': {'label': 'Promised to pay later'},
-    'D': {'label': 'No commitment to pay'},
-    'E': {'label': 'Refused to pay'},
-    'M': {'label': 'Voicemail / answering machine'},
-    'F': {'label': 'Not connected (busy/missed/rejected/off/unreachable)'},
-    'G': {'label': 'Not connected (overdue account/line fault/call failed/number changed)'},
-    'H': {'label': 'Not connected (blacklisted/blocked/invalid number/suspended)'}
+INTENTION_TAGS = {
+    'A': {'zh': '已还款', 'es': 'Haber pagado'},
+    'B': {'zh': '承诺准时还款', 'es': 'Prometer pagar a tiempo'},
+    'C': {'zh': '承诺晚点还款', 'es': 'Prometer pagar más tarde'},
+    'D': {'zh': '未承诺还款', 'es': 'No ha prometido pagar'},
+    'E': {'zh': '拒绝还款', 'es': 'Rechazar pagar'},
+    'M': {'zh': '接通后为语音/留言信箱', 'es': 'Buzón de voz'},
+    'F': {'zh': '未接通(占线/未接/拒接/关机/无法接通)', 'es': 'No conectada (ocupada/pérdida/rechazada/apagada/no se puede conectar)'},
+    'G': {'zh': '未接通(用户欠费/线路故障/呼叫失败/改号)', 'es': 'No conectado (Cuenta atrasada/Fallo de línea/Llamada fallida/Cambio de número)'},
+    'H': {'zh': '未接通(黑名单/已拦截/空号/停机)', 'es': 'No contestado (en lista negra/ha sido bloqueado/número inexistente/suspensión de línea)'}
 }
 
-BEHAVIOR_TAGS = {
-    'complaint': {'label': 'Complaint'},
-    'busy': {'label': 'Busy'},
-    'self': {'label': 'Confirmed identity'},
-    'family_friend': {'label': 'Family or friend'},
-    'wrong_number': {'label': 'Wrong number'},
-    'pay_tomorrow': {'label': 'Can pay tomorrow'},
-    'no_money': {'label': 'No money'},
-    'difficulty_paying': {'label': 'Difficulty paying'},
-    'borrower_deceased': {'label': 'Borrower deceased'},
-    'unexpected_change': {'label': 'Unexpected change in circumstances'},
-    'high_interest': {'label': 'High interest complaint'},
-    'pressured_willing': {'label': 'Willing to pay after pressure'},
-    'informed_willing': {'label': 'Willing to pay after informed'},
-    'partial_payment': {'label': 'Requesting minimum/partial payment'},
-    'request_reduction': {'label': 'Requesting reduction'},
-    'request_extension': {'label': 'Requesting extension'}
+PERSONALITY_TAGS = {
+    'complaint': {'zh': '投诉', 'es': 'Queja'},
+    'busy': {'zh': '忙', 'es': 'Ocupado'},
+    'self': {'zh': '是本人', 'es': 'En persona'},
+    'family_friend': {'zh': '家人朋友', 'es': 'Familiares y amigos'},
+    'wrong_number': {'zh': '打错电话', 'es': 'Llamar al número incorrecto'},
+    'pay_tomorrow': {'zh': '明天能还', 'es': 'Pagar mañana'},
+    'no_money': {'zh': '没钱', 'es': 'No tener dinero'},
+    'difficulty_paying': {'zh': '还款困难', 'es': 'Dificultades para pagar'},
+    'borrower_deceased': {'zh': '借款人去世', 'es': 'El pretamista ha muerto'},
+    'unexpected_change': {'zh': '遭遇变故', 'es': 'Sufrir un cambio inesperado'},
+    'high_interest': {'zh': '利息太高', 'es': 'El interés es alto'},
+    'pressured_willing': {'zh': '施压后-愿意还款', 'es': 'Presionado-voluntad de pagar'},
+    'informed_willing': {'zh': '告知还款-愿意还款', 'es': 'Informado- voluntad de pagar'},
+    'partial_payment': {'zh': '要求最低还款/部分还款', 'es': 'Pedir el pago mínimo / el pago parcial'},
+    'request_reduction': {'zh': '要求减免', 'es': 'Pedir una rebaja'},
+    'request_extension': {'zh': '要求展期', 'es': 'Pedir una prórroga'}
 }
 
 # Environment variables
-INSTANCE_ID = os.environ.get('INSTANCE_ID', '')
+UPLOAD_BUCKET = os.environ.get('UPLOAD_BUCKET', 'voice-agent-calls')
+TRANSCRIPT_BUCKET = os.environ.get('TRANSCRIPT_BUCKET', 'amazon-connect-33e29c98c260')
+TRANSCRIPT_PREFIX = os.environ.get('TRANSCRIPT_PREFIX', 'connect/tonyhh/ChatTranscripts/')
 VOICE_ANALYSIS_PREFIX = os.environ.get('VOICE_ANALYSIS_PREFIX', 'Analysis/Voice/ivr/')
-
-
-def _resolve_connect_storage():
-    """
-    Resolve TRANSCRIPT_BUCKET and TRANSCRIPT_PREFIX from Connect Instance
-    Storage Config API. Falls back to environment variables if the API call fails.
-    """
-    bucket = os.environ.get('TRANSCRIPT_BUCKET')
-    prefix = os.environ.get('TRANSCRIPT_PREFIX')
-
-    if bucket and prefix:
-        return bucket, prefix
-
-    try:
-        resp = connect_client.list_instance_storage_configs(
-            InstanceId=INSTANCE_ID,
-            ResourceType='CHAT_TRANSCRIPTS'
-        )
-        configs = resp.get('StorageConfigs', [])
-        if configs:
-            s3_config = configs[0].get('S3Config', {})
-            bucket = bucket or s3_config.get('BucketName')
-            prefix = prefix or (s3_config.get('BucketPrefix', '') + '/')
-            print(f"Resolved from Connect API: bucket={bucket}, prefix={prefix}")
-    except Exception as e:
-        print(f"Failed to resolve storage config from Connect API: {e}")
-
-    return bucket or 'outbound-transcripts', prefix or 'connect/default/ChatTranscripts/'
-
-
-TRANSCRIPT_BUCKET, TRANSCRIPT_PREFIX = _resolve_connect_storage()
+INSTANCE_ID = os.environ.get('INSTANCE_ID', 'a60dd182-7f8f-495b-945e-43420832f01c')
 
 def search_contacts_paginated(limit, time_range, search_criteria=None):
     """
@@ -136,7 +122,7 @@ def search_contacts_paginated(limit, time_range, search_criteria=None):
 
 def lambda_handler(event, context):
     """
-    API Gateway Lambda handler for outbound management platform
+    API Gateway Lambda handler for Voice Agent Platform
     """
     print(f"Received event: {json.dumps(event)}")
 
@@ -160,8 +146,27 @@ def lambda_handler(event, context):
         }
 
     try:
-        # Route handling
-        if path == '/api/records' and http_method == 'GET':
+        # Auth routes (no authentication required)
+        if path == '/api/auth/register' and http_method == 'POST':
+            return handle_register(event, cors_headers)
+        elif path == '/api/auth/login' and http_method == 'POST':
+            return handle_login(event, cors_headers)
+        elif path == '/api/auth/verify' and http_method == 'GET':
+            return handle_verify(event, cors_headers)
+
+        # All other routes require authentication
+        user_id = verify_auth_middleware(event)
+        if not user_id:
+            return {
+                'statusCode': 401,
+                'headers': cors_headers,
+                'body': json.dumps({'error': 'Unauthorized. Please log in.'})
+            }
+
+        # Protected route handling
+        if path == '/api/upload-url' and http_method == 'POST':
+            return handle_upload_url(event, cors_headers)
+        elif path == '/api/records' and http_method == 'GET':
             return handle_list_all_records(event, cors_headers)
         elif path == '/api/contacts' and http_method == 'GET':
             return handle_list_contacts(event, cors_headers)
@@ -211,6 +216,41 @@ def lambda_handler(event, context):
         elif path.startswith('/api/flows/') and http_method == 'DELETE':
             flow_id = path.split('/')[-1]
             return handle_delete_flow(flow_id, cors_headers)
+        elif path == '/api/call-records' and http_method == 'GET':
+            return handle_list_call_records(event, cors_headers)
+        elif path.startswith('/api/call-records/') and '/logs' in path and http_method == 'GET':
+            call_sid = path.split('/')[3]
+            return handle_get_call_logs(call_sid, cors_headers)
+        elif path.startswith('/api/call-records/') and '/labels' in path and http_method == 'PUT':
+            call_sid = path.split('/')[3]
+            return handle_update_call_labels(call_sid, event, cors_headers)
+        elif path.startswith('/api/call-records/') and '/auto-label' in path and http_method == 'POST':
+            call_sid = path.split('/')[3]
+            return handle_auto_label_call(call_sid, cors_headers)
+        elif path.startswith('/api/call-records/') and http_method == 'GET':
+            # Simple GET for call record details
+            call_sid = path.split('/')[-1]
+            return handle_get_call_record(call_sid, cors_headers)
+        elif path.startswith('/api/call-records/') and http_method == 'DELETE':
+            call_sid = path.split('/')[-1]
+            return handle_delete_call_record(call_sid, cors_headers)
+        elif path == '/api/projects' and http_method == 'GET':
+            return handle_list_projects(event, cors_headers)
+        elif path == '/api/projects' and http_method == 'POST':
+            return handle_create_project(event, cors_headers)
+        elif path.startswith('/api/projects/') and http_method == 'GET':
+            parts = path.split('/')
+            project_id = parts[3]
+            if len(parts) > 4 and parts[4] == 'stats':
+                return handle_get_project_stats(project_id, cors_headers)
+            else:
+                return handle_get_project(project_id, cors_headers)
+        elif path.startswith('/api/projects/') and http_method == 'PUT':
+            project_id = path.split('/')[-1]
+            return handle_update_project(project_id, event, cors_headers)
+        elif path.startswith('/api/projects/') and http_method == 'DELETE':
+            project_id = path.split('/')[-1]
+            return handle_delete_project(project_id, cors_headers)
         elif path == '/api/prompts' and http_method == 'GET':
             return handle_list_prompts(event, cors_headers)
         elif path == '/api/prompts' and http_method == 'POST':
@@ -224,15 +264,19 @@ def lambda_handler(event, context):
         elif path.startswith('/api/prompts/') and http_method == 'DELETE':
             prompt_id = path.split('/')[-1]
             return handle_delete_prompt(prompt_id, cors_headers)
-        elif path == '/api/monitor/ecs-status' and http_method == 'GET':
-            return handle_get_ecs_status(cors_headers)
-        elif path == '/api/monitor/active-calls' and http_method == 'GET':
-            return handle_get_active_calls_summary(cors_headers)
-        elif path == '/api/call-records' and http_method == 'GET':
-            return handle_list_call_records(event, cors_headers)
-        elif path.startswith('/api/call-records/') and http_method == 'GET':
-            call_sid = path.split('/')[-1]
-            return handle_get_call_record(call_sid, cors_headers)
+        elif path == '/api/labels' and http_method == 'GET':
+            return handle_list_labels(event, cors_headers)
+        elif path == '/api/labels' and http_method == 'POST':
+            return handle_create_label(event, cors_headers)
+        elif path.startswith('/api/labels/') and http_method == 'GET':
+            label_id = path.split('/')[-1]
+            return handle_get_label(label_id, cors_headers)
+        elif path.startswith('/api/labels/') and http_method == 'PUT':
+            label_id = path.split('/')[-1]
+            return handle_update_label(label_id, event, cors_headers)
+        elif path.startswith('/api/labels/') and http_method == 'DELETE':
+            label_id = path.split('/')[-1]
+            return handle_delete_label(label_id, cors_headers)
         else:
             return {
                 'statusCode': 404,
@@ -241,6 +285,43 @@ def lambda_handler(event, context):
             }
     except Exception as e:
         print(f"Error: {str(e)}")
+        return {
+            'statusCode': 500,
+            'headers': cors_headers,
+            'body': json.dumps({'error': str(e)})
+        }
+
+
+def handle_upload_url(event, cors_headers):
+    """
+    Generate pre-signed URL for CSV upload
+    """
+    try:
+        body = json.loads(event.get('body', '{}'))
+        filename = body.get('filename', 'customer_list.csv')
+
+        # Generate pre-signed URL for upload
+        presigned_url = s3_client.generate_presigned_url(
+            'put_object',
+            Params={
+                'Bucket': UPLOAD_BUCKET,
+                'Key': filename,
+                'ContentType': 'text/csv'
+            },
+            ExpiresIn=3600  # 1 hour
+        )
+
+        return {
+            'statusCode': 200,
+            'headers': cors_headers,
+            'body': json.dumps({
+                'uploadUrl': presigned_url,
+                'filename': filename,
+                'bucket': UPLOAD_BUCKET
+            })
+        }
+    except Exception as e:
+        print(f"Error generating upload URL: {str(e)}")
         return {
             'statusCode': 500,
             'headers': cors_headers,
@@ -309,7 +390,7 @@ def handle_list_all_records(event, cors_headers):
     """
     try:
         query_params = event.get('queryStringParameters') or {}
-        limit = int(query_params.get('limit', '20'))
+        limit = int(query_params.get('limit', '20'))  # Changed default to 20
         days = int(query_params.get('days', '7'))
 
         # Step 1: Search contacts from Connect (fast)
@@ -341,6 +422,7 @@ def handle_list_all_records(event, cors_headers):
                     contact_details[detail['contactId']] = detail
 
             # Step 3: Concurrent check transcripts (20 workers)
+            # Build channel map and timestamp map from search results
             channel_map = {c.get('Id'): c.get('Channel') for c in contacts}
             timestamp_map = {c.get('Id'): c.get('InitiationTimestamp') for c in contacts}
             transcript_status = {}
@@ -410,12 +492,14 @@ def handle_list_contacts(event, cors_headers):
     try:
         query_params = event.get('queryStringParameters') or {}
         limit = int(query_params.get('limit', '50'))
-        channel = query_params.get('channel', 'VOICE')
-        days = int(query_params.get('days', '7'))
+        channel = query_params.get('channel', 'VOICE')  # VOICE or CHAT
+        days = int(query_params.get('days', '7'))  # Default last 7 days
 
+        # Calculate time range
         end_time = datetime.utcnow()
         start_time = end_time - timedelta(days=days)
 
+        # Search contacts with pagination
         time_range = {
             'Type': 'INITIATION_TIMESTAMP',
             'StartTime': start_time,
@@ -427,6 +511,7 @@ def handle_list_contacts(event, cors_headers):
         for contact in raw_contacts:
             contact_id = contact.get('Id')
 
+            # Get detailed contact info
             try:
                 detail = connect_client.describe_contact(
                     InstanceId=INSTANCE_ID,
@@ -458,6 +543,7 @@ def handle_list_contacts(event, cors_headers):
                     'initiationTimestamp': contact.get('InitiationTimestamp').isoformat() if contact.get('InitiationTimestamp') else None,
                 })
 
+        # Filter by channel if specified
         if channel:
             contacts = [c for c in contacts if c.get('channel') == channel]
 
@@ -526,18 +612,22 @@ def handle_list_transcripts(event, cors_headers):
         limit = int(query_params.get('limit', '50'))
         days = int(query_params.get('days', '7'))
 
+        # Calculate time range
         end_time = datetime.utcnow()
         start_time = end_time - timedelta(days=days)
 
+        # Search contacts via Connect API with pagination
         time_range = {
             'Type': 'INITIATION_TIMESTAMP',
             'StartTime': start_time,
             'EndTime': end_time
         }
 
+        # Try to filter by CHAT channel via SearchCriteria
         try:
             contacts = search_contacts_paginated(limit, time_range, search_criteria={'Channels': ['CHAT']})
         except Exception as e:
+            # Fallback: fetch all contacts and filter client-side
             print(f"Channel filter not supported, falling back to client filter: {str(e)}")
             all_contacts = search_contacts_paginated(limit, time_range)
             contacts = [c for c in all_contacts if c.get('Channel') == 'CHAT']
@@ -551,12 +641,14 @@ def handle_list_transcripts(event, cors_headers):
 
         contact_ids = [c.get('Id') for c in contacts]
 
+        # Concurrent fetch contact details
         contact_details = {}
         with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
             results = executor.map(get_contact_detail, contact_ids)
             for detail in results:
                 contact_details[detail['contactId']] = detail
 
+        # Build transcript list
         transcripts = []
         for contact in contacts:
             contact_id = contact.get('Id')
@@ -574,6 +666,7 @@ def handle_list_transcripts(event, cors_headers):
                 'disconnectReason': detail.get('disconnectReason')
             })
 
+        # Sort by timestamp descending (newest first)
         transcripts.sort(key=lambda x: x.get('timestamp') or '', reverse=True)
 
         return {
@@ -602,6 +695,7 @@ def _find_chat_transcript_key(contact_id, initiation_timestamp):
     if not initiation_timestamp:
         return None
 
+    # Try the initiation date and the previous day (UTC midnight boundary)
     dates_to_try = [initiation_timestamp]
     prev_day = initiation_timestamp - timedelta(days=1)
     dates_to_try.append(prev_day)
@@ -652,6 +746,7 @@ def handle_get_transcript(contact_id, cors_headers):
     Get transcript by contact ID - searches both Chat transcripts and Voice analysis
     """
     try:
+        # First get contact details for phone numbers and initiation timestamp
         contact_info = {}
         channel = None
         initiation_timestamp = None
@@ -682,6 +777,7 @@ def handle_get_transcript(contact_id, cors_headers):
         messages = []
         transcript_found = False
 
+        # Search for Chat transcript using precise date-based prefix
         chat_key = _find_chat_transcript_key(contact_id, initiation_timestamp)
         if chat_key:
             response = s3_client.get_object(Bucket=TRANSCRIPT_BUCKET, Key=chat_key)
@@ -700,6 +796,7 @@ def handle_get_transcript(contact_id, cors_headers):
                     })
             transcript_found = True
 
+        # If no Chat transcript, search for Voice analysis with date-based prefix
         if not transcript_found:
             voice_key = _find_voice_transcript_key(contact_id, initiation_timestamp)
             if voice_key:
@@ -722,6 +819,7 @@ def handle_get_transcript(contact_id, cors_headers):
                     })
                 transcript_found = True
 
+        # Sort voice messages by offset if present
         if messages and messages[0].get('offsetMs') is not None:
             messages.sort(key=lambda x: x.get('offsetMs', 0))
 
@@ -749,6 +847,7 @@ def handle_analyze_conversation(contact_id, cors_headers):
     Analyze conversation using Claude model and generate tags
     """
     try:
+        # First get the transcript
         transcript_result = get_transcript_messages(contact_id)
 
         if not transcript_result['found']:
@@ -760,13 +859,19 @@ def handle_analyze_conversation(contact_id, cors_headers):
 
         messages = transcript_result['messages']
 
+        # If no messages, might be unanswered call
         if not messages:
+            # Check disconnect reason to determine tag
             disconnect_reason = transcript_result.get('disconnectReason', '')
             analysis_result = determine_unanswered_tag(disconnect_reason)
         else:
+            # Format conversation for analysis
             conversation_text = format_conversation_for_analysis(messages)
+
+            # Call Claude model for analysis
             analysis_result = call_claude_for_analysis(conversation_text)
 
+        # Save analysis result to S3
         save_analysis_result(contact_id, analysis_result)
 
         return {
@@ -835,6 +940,7 @@ def get_transcript_messages(contact_id):
     disconnect_reason = None
     initiation_timestamp = None
 
+    # Get contact details first
     try:
         detail = connect_client.describe_contact(
             InstanceId=INSTANCE_ID,
@@ -845,6 +951,7 @@ def get_transcript_messages(contact_id):
     except:
         pass
 
+    # Search for Chat transcript using precise date-based prefix
     chat_key = _find_chat_transcript_key(contact_id, initiation_timestamp)
     if chat_key:
         response = s3_client.get_object(Bucket=TRANSCRIPT_BUCKET, Key=chat_key)
@@ -859,6 +966,7 @@ def get_transcript_messages(contact_id):
                 })
         found = True
 
+    # If no Chat transcript, search for Voice analysis with date-based prefix
     if not found:
         voice_key = _find_voice_transcript_key(contact_id, initiation_timestamp)
         if voice_key:
@@ -891,9 +999,9 @@ def format_conversation_for_analysis(messages):
         role = msg.get('role', 'UNKNOWN')
         content = msg.get('content', '')
         if role in ['CUSTOMER', 'CONTACT']:
-            lines.append(f"Customer: {content}")
+            lines.append(f"客户: {content}")
         else:
-            lines.append(f"Agent: {content}")
+            lines.append(f"催收员: {content}")
     return '\n'.join(lines)
 
 
@@ -903,21 +1011,23 @@ def determine_unanswered_tag(disconnect_reason):
     """
     disconnect_reason = disconnect_reason or ''
 
+    # Map disconnect reasons to intention tags
     if 'BUSY' in disconnect_reason or 'NO_ANSWER' in disconnect_reason or 'REJECTED' in disconnect_reason:
-        outcome_code = 'F'
+        intention_code = 'F'
     elif 'INVALID_NUMBER' in disconnect_reason or 'UNROUTABLE_NUMBER' in disconnect_reason:
-        outcome_code = 'H'
+        intention_code = 'H'
     elif 'SERVICE_QUOTA_EXCEEDED' in disconnect_reason or 'TELECOM' in disconnect_reason:
-        outcome_code = 'G'
+        intention_code = 'G'
     else:
-        outcome_code = 'F'
+        intention_code = 'F'  # Default to F for unknown unanswered reasons
 
     return {
-        'outcomeTag': {
-            'code': outcome_code,
-            'label': OUTCOME_TAGS[outcome_code]['label']
+        'intentionTag': {
+            'code': intention_code,
+            'label_zh': INTENTION_TAGS[intention_code]['zh'],
+            'label_es': INTENTION_TAGS[intention_code]['es']
         },
-        'behaviorTags': []
+        'personalityTags': []
     }
 
 
@@ -925,49 +1035,49 @@ def call_claude_for_analysis(conversation_text):
     """
     Call Claude model to analyze conversation
     """
-    prompt = f"""You are a professional outbound call conversation analyst. Analyze the following conversation and output the analysis result.
+    prompt = f"""你是一个专业的催收对话分析助手。请分析以下催收对话，并输出分析结果。
 
-Conversation:
+对话内容：
 {conversation_text}
 
-Based on the conversation content, select:
+请根据对话内容，选择：
 
-1. Outcome tag (select only one):
-- A: Already paid
-- B: Promised to pay on time
-- C: Promised to pay later
-- D: No commitment to pay
-- E: Refused to pay
-- M: Voicemail / answering machine
+1. 意向标签（只选择一个）：
+- A: 已还款
+- B: 承诺准时还款
+- C: 承诺晚点还款
+- D: 未承诺还款
+- E: 拒绝还款
+- M: 接通后为语音/留言信箱
 
-2. Behavior tags (select all that apply):
-- complaint: Complaint
-- busy: Busy
-- self: Confirmed identity
-- family_friend: Family or friend
-- wrong_number: Wrong number
-- pay_tomorrow: Can pay tomorrow
-- no_money: No money
-- difficulty_paying: Difficulty paying
-- borrower_deceased: Borrower deceased
-- unexpected_change: Unexpected change in circumstances
-- high_interest: High interest complaint
-- pressured_willing: Willing to pay after pressure
-- informed_willing: Willing to pay after informed
-- partial_payment: Requesting minimum/partial payment
-- request_reduction: Requesting reduction
-- request_extension: Requesting extension
+2. 个性标签（可多选，只选择适用的）：
+- complaint: 投诉
+- busy: 忙
+- self: 是本人
+- family_friend: 家人朋友
+- wrong_number: 打错电话
+- pay_tomorrow: 明天能还
+- no_money: 没钱
+- difficulty_paying: 还款困难
+- borrower_deceased: 借款人去世
+- unexpected_change: 遭遇变故
+- high_interest: 利息太高
+- pressured_willing: 施压后-愿意还款
+- informed_willing: 告知还款-愿意还款
+- partial_payment: 要求最低还款/部分还款
+- request_reduction: 要求减免
+- request_extension: 要求展期
 
-Return the result in XML format as follows:
+请以XML格式返回结果，格式如下：
 <analysis>
-  <outcome_code>B</outcome_code>
-  <behavior_codes>
+  <intention_code>B</intention_code>
+  <personality_codes>
     <code>self</code>
     <code>pay_tomorrow</code>
-  </behavior_codes>
+  </personality_codes>
 </analysis>
 
-Return only the XML, nothing else."""
+只返回XML，不要其他内容。"""
 
     try:
         response = bedrock_client.invoke_model(
@@ -988,39 +1098,46 @@ Return only the XML, nothing else."""
 
         print(f"Claude response text: {result_text}")
 
-        outcome_match = re.search(r'<outcome_code>([A-HM])</outcome_code>', result_text)
-        outcome_code = outcome_match.group(1) if outcome_match else 'D'
+        # Extract intention code using regex
+        intention_match = re.search(r'<intention_code>([A-HM])</intention_code>', result_text)
+        intention_code = intention_match.group(1) if intention_match else 'D'
 
-        behavior_codes = []
-        behavior_matches = re.findall(r'<code>(\w+)</code>', result_text)
-        if behavior_matches:
-            behavior_codes = behavior_matches
+        # Extract personality codes using regex
+        personality_codes = []
+        personality_matches = re.findall(r'<code>(\w+)</code>', result_text)
+        if personality_matches:
+            personality_codes = personality_matches
 
+        # Build formatted result
         analysis_result = {
-            'outcomeTag': {
-                'code': outcome_code,
-                'label': OUTCOME_TAGS.get(outcome_code, {}).get('label', 'Unknown')
+            'intentionTag': {
+                'code': intention_code,
+                'label_zh': INTENTION_TAGS.get(intention_code, {}).get('zh', '未知'),
+                'label_es': INTENTION_TAGS.get(intention_code, {}).get('es', 'Unknown')
             },
-            'behaviorTags': []
+            'personalityTags': []
         }
 
-        for code in behavior_codes:
-            if code in BEHAVIOR_TAGS:
-                analysis_result['behaviorTags'].append({
+        for code in personality_codes:
+            if code in PERSONALITY_TAGS:
+                analysis_result['personalityTags'].append({
                     'code': code,
-                    'label': BEHAVIOR_TAGS[code]['label']
+                    'label_zh': PERSONALITY_TAGS[code]['zh'],
+                    'label_es': PERSONALITY_TAGS[code]['es']
                 })
 
         return analysis_result
 
     except Exception as e:
         print(f"Error calling Claude: {str(e)}")
+        # Return default result on error
         return {
-            'outcomeTag': {
+            'intentionTag': {
                 'code': 'D',
-                'label': OUTCOME_TAGS['D']['label']
+                'label_zh': INTENTION_TAGS['D']['zh'],
+                'label_es': INTENTION_TAGS['D']['es']
             },
-            'behaviorTags': [],
+            'personalityTags': [],
             'error': str(e)
         }
 
@@ -1043,3 +1160,23 @@ def save_analysis_result(contact_id, analysis_result):
         Body=json.dumps(data, ensure_ascii=False),
         ContentType='application/json'
     )
+
+# Import customer management functions
+from customer_functions import (
+    handle_import_customers,
+    handle_list_customers,
+    handle_get_customer,
+    handle_update_customer,
+    handle_delete_customer,
+    handle_single_call,
+    handle_batch_call
+)
+
+# Import flow configuration functions
+from flow_config_functions import (
+    handle_create_flow,
+    handle_list_flows,
+    handle_get_flow,
+    handle_update_flow,
+    handle_delete_flow
+)

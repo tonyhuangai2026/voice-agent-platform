@@ -162,17 +162,20 @@ export function ChatViewer({ contactId, onClose }: ChatViewerProps) {
       {analysis ? (
         <div style={{ marginBottom: 16 }}>
           <Descriptions bordered size="small" column={1}>
-            <Descriptions.Item label="Outcome Tag">
+            <Descriptions.Item label="Intention Tag / 意向标签">
               <Tag color="blue" style={{ fontSize: '14px', padding: '4px 12px' }}>
-                {analysis.outcomeTag.code}: {analysis.outcomeTag.label}
+                {analysis.intentionTag.code}: {analysis.intentionTag.label_zh}
               </Tag>
+              <Text type="secondary" style={{ marginLeft: 8 }}>
+                {analysis.intentionTag.label_es}
+              </Text>
             </Descriptions.Item>
-            <Descriptions.Item label="Behavior Tags">
-              {analysis.behaviorTags.length > 0 ? (
+            <Descriptions.Item label="Personality Tags / 个性标签">
+              {analysis.personalityTags.length > 0 ? (
                 <Space wrap>
-                  {analysis.behaviorTags.map((tag) => (
+                  {analysis.personalityTags.map((tag) => (
                     <Tag key={tag.code} color="green">
-                      {tag.label}
+                      {tag.label_zh} / {tag.label_es}
                     </Tag>
                   ))}
                 </Space>
@@ -230,7 +233,7 @@ export function ChatViewer({ contactId, onClose }: ChatViewerProps) {
               maxHeight: '400px',
               overflowY: 'auto',
               padding: '8px',
-              backgroundColor: '#f5f5f5',
+              backgroundColor: '#141414',
               borderRadius: '8px',
             }}
           >
@@ -260,8 +263,8 @@ function ChatBubble({ message }: { message: ChatMessage }) {
     maxWidth: '70%',
     padding: '10px 14px',
     borderRadius: isCustomer ? '18px 18px 4px 18px' : '18px 18px 18px 4px',
-    backgroundColor: isCustomer ? '#1890ff' : '#fff',
-    color: isCustomer ? '#fff' : '#333',
+    backgroundColor: isCustomer ? '#1668dc' : '#303030',
+    color: 'rgba(255,255,255,0.85)',
     marginLeft: isCustomer ? 'auto' : '0',
     marginRight: isCustomer ? '0' : 'auto',
     boxShadow: '0 1px 2px rgba(0,0,0,0.1)',
@@ -307,7 +310,7 @@ function ChatBubble({ message }: { message: ChatMessage }) {
         )}
       </div>
       <div style={bubbleStyle}>
-        <Text style={{ color: isCustomer ? '#fff' : '#333' }}>{content}</Text>
+        <Text style={{ color: 'rgba(255,255,255,0.85)' }}>{content}</Text>
       </div>
       <Text type="secondary" style={{ fontSize: '10px', marginTop: 4 }}>
         {formatTime()}

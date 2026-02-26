@@ -14,7 +14,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
-OUTBOUND_ROOT="$(cd "${PROJECT_ROOT}/../didi-outbound" && pwd)"
+OUTBOUND_ROOT="${PROJECT_ROOT}"
 
 # --- Load .env if present (won't override already-exported vars) ---
 ENV_FILE="${SCRIPT_DIR}/../.env"

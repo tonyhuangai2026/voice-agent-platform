@@ -7,7 +7,9 @@ import uuid
 from datetime import datetime
 import boto3
 
-dynamodb = boto3.resource('dynamodb', region_name='us-west-2')
+DYNAMODB_REGION = os.environ.get('DYNAMODB_REGION', 'us-east-1')
+
+dynamodb = boto3.resource('dynamodb', region_name=DYNAMODB_REGION)
 prompts_table = dynamodb.Table(os.environ.get('PROMPTS_TABLE', 'outbound-prompts'))
 
 
@@ -63,11 +65,23 @@ def handle_list_prompts(event, cors_headers):
     try:
         query_params = event.get('queryStringParameters') or {}
         is_active = query_params.get('is_active')
+        project_id = query_params.get('project_id')
 
         scan_kwargs = {}
+        filter_expressions = []
+        expr_values = {}
+
         if is_active:
-            scan_kwargs['FilterExpression'] = 'is_active = :active'
-            scan_kwargs['ExpressionAttributeValues'] = {':active': is_active == 'true'}
+            filter_expressions.append('is_active = :active')
+            expr_values[':active'] = is_active == 'true'
+
+        if project_id:
+            filter_expressions.append('project_id = :project_id')
+            expr_values[':project_id'] = project_id
+
+        if filter_expressions:
+            scan_kwargs['FilterExpression'] = ' AND '.join(filter_expressions)
+            scan_kwargs['ExpressionAttributeValues'] = expr_values
 
         response = prompts_table.scan(**scan_kwargs)
 

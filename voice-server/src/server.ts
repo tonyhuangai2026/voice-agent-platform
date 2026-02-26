@@ -605,6 +605,12 @@ fastify.register(async (fastify) => {
             });
 
             sess.onEvent('audioOutput', (data) => {
+                const contentLen = data['content']?.length || 0;
+                console.log(`[audioOutput] streamSid=${sess.streamSid}, contentLen=${contentLen}, wsReady=${connection.readyState}`);
+                if (!data['content']) {
+                    console.warn('[audioOutput] No content in audio data!');
+                    return;
+                }
                 const buffer = Buffer.from(data['content'], 'base64');
                 const pcmSamples = new Int16Array(buffer.buffer, buffer.byteOffset, buffer.length / Int16Array.BYTES_PER_ELEMENT);
                 const mulawSamples = mulaw.encode(pcmSamples);
