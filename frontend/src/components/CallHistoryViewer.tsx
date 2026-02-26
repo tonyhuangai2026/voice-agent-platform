@@ -437,8 +437,9 @@ export function CallHistoryViewer() {
           rowKey="callSid"
           loading={loading}
           pagination={{
-            pageSize: 20,
+            defaultPageSize: 20,
             showSizeChanger: true,
+            pageSizeOptions: [10, 20, 50, 100],
             showTotal: (total) => `Total ${total} calls`,
           }}
           scroll={{ x: 1200 }}
