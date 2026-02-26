@@ -133,25 +133,32 @@ export class CallRecordManager {
   }
 
   /** Mark a call as completed */
-  async completeRecord(callSid: string, endReason: string): Promise<void> {
+  async completeRecord(callSid: string, endReason: string, recordingS3Key?: string): Promise<void> {
     try {
       const endTime = new Date().toISOString();
+      let updateExpr = 'SET #st = :completed, endTime = :endTime, endReason = :reason';
+      const exprValues: Record<string, any> = {
+        ':completed': 'completed',
+        ':endTime': endTime,
+        ':reason': endReason,
+      };
+
+      if (recordingS3Key) {
+        updateExpr += ', recordingS3Key = :recKey';
+        exprValues[':recKey'] = recordingS3Key;
+      }
+
       await this.ddbDoc.send(
         new UpdateCommand({
           TableName: this.tableName,
           Key: { callSid },
-          UpdateExpression:
-            'SET #st = :completed, endTime = :endTime, endReason = :reason',
+          UpdateExpression: updateExpr,
           ExpressionAttributeNames: { '#st': 'status' },
-          ExpressionAttributeValues: {
-            ':completed': 'completed',
-            ':endTime': endTime,
-            ':reason': endReason,
-          },
+          ExpressionAttributeValues: exprValues,
           ConditionExpression: 'attribute_exists(callSid)',
         })
       );
-      console.log(`[CallRecords] Completed record for ${callSid}: ${endReason}`);
+      console.log(`[CallRecords] Completed record for ${callSid}: ${endReason}${recordingS3Key ? ` (recording: ${recordingS3Key})` : ''}`);
     } catch (err) {
       console.error(`[CallRecords] Error completing record for ${callSid}:`, err);
     }

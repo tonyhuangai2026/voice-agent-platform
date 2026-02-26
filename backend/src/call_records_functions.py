@@ -3,9 +3,12 @@ import boto3
 import os
 from decimal import Decimal
 from datetime import datetime
+from botocore.config import Config
 
 dynamodb = boto3.resource('dynamodb', region_name=os.environ.get('DYNAMODB_REGION', 'us-east-1'))
 call_records_table = dynamodb.Table(os.environ.get('CALL_RECORDS_TABLE', 'outbound-call-records'))
+s3_client = boto3.client('s3', config=Config(signature_version='s3v4'))
+RECORDING_BUCKET = os.environ.get('RECORDING_BUCKET', '')
 
 
 class DecimalEncoder(json.JSONEncoder):
@@ -160,6 +163,70 @@ def handle_get_call_record(call_sid, cors_headers):
         }
     except Exception as e:
         print(f"Error getting call record: {str(e)}")
+        return {
+            'statusCode': 500,
+            'headers': cors_headers,
+            'body': json.dumps({'error': str(e)})
+        }
+
+
+def handle_get_recording_url(call_sid, cors_headers):
+    """
+    GET /api/call-records/{call_sid}/recording
+    Generate a presigned URL for downloading the call recording WAV file.
+    """
+    try:
+        if not RECORDING_BUCKET:
+            return {
+                'statusCode': 500,
+                'headers': cors_headers,
+                'body': json.dumps({'error': 'Recording bucket not configured'})
+            }
+
+        response = call_records_table.get_item(Key={'callSid': call_sid})
+
+        if 'Item' not in response:
+            return {
+                'statusCode': 404,
+                'headers': cors_headers,
+                'body': json.dumps({'error': 'Call record not found'})
+            }
+
+        record = response['Item']
+        s3_key = record.get('recordingS3Key')
+
+        if not s3_key:
+            return {
+                'statusCode': 404,
+                'headers': cors_headers,
+                'body': json.dumps({'error': 'No recording available for this call'})
+            }
+
+        filename = f"{call_sid}.wav"
+        expires_in = 900  # 15 minutes
+
+        download_url = s3_client.generate_presigned_url(
+            'get_object',
+            Params={
+                'Bucket': RECORDING_BUCKET,
+                'Key': s3_key,
+                'ResponseContentDisposition': f'attachment; filename="{filename}"',
+            },
+            ExpiresIn=expires_in,
+        )
+
+        return {
+            'statusCode': 200,
+            'headers': cors_headers,
+            'body': json.dumps({
+                'downloadUrl': download_url,
+                'callSid': call_sid,
+                'filename': filename,
+                'expiresIn': expires_in,
+            })
+        }
+    except Exception as e:
+        print(f"Error generating recording URL for {call_sid}: {str(e)}")
         return {
             'statusCode': 500,
             'headers': cors_headers,

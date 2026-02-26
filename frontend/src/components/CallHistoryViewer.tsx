@@ -1,10 +1,10 @@
 import { useState, useEffect } from 'react';
 import { Card, Table, Input, Select, Space, Tag, Button, Modal, Typography, Descriptions, Empty, Spin, message, Popconfirm, Form, Radio, Checkbox } from 'antd';
-import { SearchOutlined, MessageOutlined, PhoneOutlined, ClockCircleOutlined, UserOutlined, RobotOutlined, DeleteOutlined, TagsOutlined, ThunderboltOutlined, FileTextOutlined } from '@ant-design/icons';
+import { SearchOutlined, MessageOutlined, PhoneOutlined, ClockCircleOutlined, UserOutlined, RobotOutlined, DeleteOutlined, TagsOutlined, ThunderboltOutlined, FileTextOutlined, DownloadOutlined } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
 import dayjs from 'dayjs';
 import duration from 'dayjs/plugin/duration';
-import { listCallRecords, deleteCallRecord, listLabels, updateCallLabels, autoLabelCall } from '../api';
+import { listCallRecords, deleteCallRecord, listLabels, updateCallLabels, autoLabelCall, getCallRecordingUrl } from '../api';
 import type { DynamoCallRecord, LabelConfig, CallLabels } from '../types';
 import { useProject } from '../contexts/ProjectContext';
 import LogViewer from './LogViewer';
@@ -160,6 +160,16 @@ export function CallHistoryViewer() {
     }
   };
 
+  const handleDownloadRecording = async (callSid: string) => {
+    try {
+      const data = await getCallRecordingUrl(callSid);
+      window.open(data.downloadUrl, '_blank');
+    } catch (error: any) {
+      message.error(error.response?.data?.error || 'Failed to download recording');
+      console.error(error);
+    }
+  };
+
   const calculateDuration = (startTime?: string, endTime?: string) => {
     if (!startTime || !endTime) return '-';
     const start = dayjs(startTime);
@@ -308,6 +318,14 @@ export function CallHistoryViewer() {
           >
             Logs
           </Button>
+          <Button
+            type="link"
+            icon={<DownloadOutlined />}
+            onClick={() => handleDownloadRecording(record.callSid)}
+            disabled={!record.recordingS3Key}
+          >
+            Audio
+          </Button>
           <Popconfirm
             title="Delete call record"
             description="Are you sure you want to delete this call record?"
@@ -438,6 +456,15 @@ export function CallHistoryViewer() {
         onCancel={() => setModalVisible(false)}
         width={800}
         footer={[
+          selectedCall?.recordingS3Key && (
+            <Button
+              key="download"
+              icon={<DownloadOutlined />}
+              onClick={() => handleDownloadRecording(selectedCall.callSid)}
+            >
+              Download Recording
+            </Button>
+          ),
           <Button key="close" onClick={() => setModalVisible(false)}>
             Close
           </Button>,

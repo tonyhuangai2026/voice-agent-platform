@@ -352,6 +352,11 @@ export async function autoLabelCall(callSid: string): Promise<{ message: string;
   return response.data;
 }
 
+export async function getCallRecordingUrl(callSid: string): Promise<{ downloadUrl: string; callSid: string; filename: string; expiresIn: number }> {
+  const response = await api.get<{ downloadUrl: string; callSid: string; filename: string; expiresIn: number }>(`/api/call-records/${callSid}/recording`);
+  return response.data;
+}
+
 // Call Logs API
 export interface CallLog {
   callSid: string;

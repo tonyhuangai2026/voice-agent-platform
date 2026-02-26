@@ -223,6 +223,7 @@ export interface DynamoCallRecord {
   }>;
   labels?: CallLabels;
   auto_labeled_at?: string;
+  recordingS3Key?: string;
 }
 
 export interface DynamoCallRecordsResponse {

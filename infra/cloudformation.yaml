@@ -386,6 +386,15 @@ Resources:
                   - dynamodb:PutItem
                 Resource:
                   - !GetAtt CallLogsTableResource.Arn
+        - PolicyName: S3RecordingUpload
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:PutObject
+                Resource:
+                  - 'arn:aws:s3:::voice-agent-calls-*/recordings/*'
 
   # ===== Application =====
 
@@ -475,6 +484,8 @@ Resources:
               Value: !Ref CallLogsTable
             - Name: DYNAMODB_REGION
               Value: !Ref AWS::Region
+            - Name: RECORDING_BUCKET
+              Value: !Ref RecordingBucket
           Secrets:
             - Name: TWILIO_ACCOUNT_SID
               ValueFrom: !Sub '${TwilioSecret}:TWILIO_ACCOUNT_SID::'
@@ -875,6 +886,7 @@ Resources:
           ECS_CLUSTER_NAME: !Ref ECSCluster
           ECS_SERVICE_NAME: !GetAtt ECSService.Name
           ECS_REGION: !Ref AWS::Region
+          RECORDING_BUCKET: !Ref RecordingBucket
       Code:
         ZipFile: |
           def lambda_handler(event, context):
@@ -933,6 +945,18 @@ Resources:
       Action: lambda:InvokeFunction
       Principal: apigateway.amazonaws.com
       SourceArn: !Sub 'arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${HttpApi}/*'
+
+  # ===== Recording S3 Bucket =====
+
+  RecordingBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub 'voice-agent-calls-${AWS::AccountId}'
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
 
   # ===== Frontend (S3 + CloudFront) =====
 

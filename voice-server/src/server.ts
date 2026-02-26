@@ -14,6 +14,7 @@ import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import { DynamoDBDocumentClient, QueryCommand, GetCommand } from '@aws-sdk/lib-dynamodb';
 import { CallRecordManager } from './call-records';
 import { callLogger } from './call-logger';
+import { AudioRecorder } from './audio-recorder';
 // Farewell keywords that trigger automatic hangup
 const FAREWELL_KEYWORDS = ['have a great day', 'que tenga buen día'];
 
@@ -228,6 +229,7 @@ fastify.register(async (fastify) => {
         let callTimer: ReturnType<typeof setTimeout> | null = null;
         let pendingHangup = false; // flag: AI requested hangup, waiting for audio to finish
         let callEnded = false; // prevent double hangup
+        let audioRecorder: AudioRecorder | null = null;
         let stopAcceptingUserAudio = false; // stop accepting user audio after hangup requested
         let hangupTimerScheduled = false; // prevent multiple 2s hangup timers
 
@@ -263,8 +265,19 @@ fastify.register(async (fastify) => {
             }
             if (callTimer) { clearTimeout(callTimer); callTimer = null; }
 
+            // Finalize recording and upload to S3
+            let recordingS3Key: string | undefined;
+            if (audioRecorder) {
+                try {
+                    const key = await audioRecorder.finalizeAndUpload();
+                    if (key) recordingS3Key = key;
+                } catch (err) {
+                    console.error(`Failed to finalize recording for ${callSid}:`, err);
+                }
+            }
+
             // Complete the call record and notify SSE listeners
-            callRecords.completeRecord(callSid, reason);
+            callRecords.completeRecord(callSid, reason, recordingS3Key);
             const sess = activeSessions.get(callSid);
             if (sess) {
                 sess.emitter.emit('done', { reason });
@@ -361,6 +374,7 @@ fastify.register(async (fastify) => {
 
                         session.streamSid = data.streamSid;
                         callSid = data.start.callSid; //call sid to update while redirecting it to SIP endpoint
+                        audioRecorder = new AudioRecorder(callSid);
                         console.log(`Stream started streamSid: ${session.streamSid}, callSid: ${callSid}`);
 
                         // Start max call duration timer
@@ -419,6 +433,8 @@ fastify.register(async (fastify) => {
                         const pcmSamples = mulaw.decode(audioInput);
                         const audioBuffer = Buffer.from(pcmSamples.buffer);
 
+                        if (audioRecorder) audioRecorder.appendCustomerAudio(audioBuffer);
+
                         await currentSession.streamAudio(audioBuffer);
                         break;
 
@@ -442,7 +458,7 @@ fastify.register(async (fastify) => {
         });
 
         // Handle connection close
-        connection.on('close', () => {
+        connection.on('close', async () => {
             console.log('Client disconnected.');
             if (callTimer) { clearTimeout(callTimer); callTimer = null; }
 
@@ -453,7 +469,18 @@ fastify.register(async (fastify) => {
                     turnCount: activeSessions.get(callSid)?.turnCount || 0
                 });
 
-                callRecords.completeRecord(callSid, 'disconnect');
+                // Finalize recording on disconnect
+                let recordingS3Key: string | undefined;
+                if (audioRecorder) {
+                    try {
+                        const key = await audioRecorder.finalizeAndUpload();
+                        if (key) recordingS3Key = key;
+                    } catch (err) {
+                        console.error(`Failed to finalize recording on disconnect for ${callSid}:`, err);
+                    }
+                }
+
+                callRecords.completeRecord(callSid, 'disconnect', recordingS3Key);
                 const sess = activeSessions.get(callSid);
                 if (sess) {
                     sess.emitter.emit('done', { reason: 'disconnect' });
@@ -612,6 +639,9 @@ fastify.register(async (fastify) => {
                     return;
                 }
                 const buffer = Buffer.from(data['content'], 'base64');
+
+                if (audioRecorder) audioRecorder.appendAiAudio(buffer);
+
                 const pcmSamples = new Int16Array(buffer.buffer, buffer.byteOffset, buffer.length / Int16Array.BYTES_PER_ELEMENT);
                 const mulawSamples = mulaw.encode(pcmSamples);
                 const payload = Buffer.from(mulawSamples).toString('base64');

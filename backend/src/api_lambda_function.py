@@ -26,7 +26,8 @@ from prompt_config_functions import (
 )
 from call_records_functions import (
     handle_list_call_records, handle_delete_call_record,
-    handle_update_call_labels, handle_get_call_record
+    handle_update_call_labels, handle_get_call_record,
+    handle_get_recording_url
 )
 from project_functions import (
     handle_create_project, handle_list_projects, handle_get_project,
@@ -227,6 +228,9 @@ def lambda_handler(event, context):
         elif path.startswith('/api/call-records/') and '/auto-label' in path and http_method == 'POST':
             call_sid = path.split('/')[3]
             return handle_auto_label_call(call_sid, cors_headers)
+        elif path.startswith('/api/call-records/') and '/recording' in path and http_method == 'GET':
+            call_sid = path.split('/')[3]
+            return handle_get_recording_url(call_sid, cors_headers)
         elif path.startswith('/api/call-records/') and http_method == 'GET':
             # Simple GET for call record details
             call_sid = path.split('/')[-1]
