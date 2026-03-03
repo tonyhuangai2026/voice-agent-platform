@@ -37,6 +37,9 @@ def handle_create_prompt(event, cors_headers):
             'prompt_content': body['prompt_content'],
             'description': body.get('description', ''),
             'is_active': body.get('is_active', True),
+            'rag_enabled': body.get('rag_enabled', False),
+            'kb_id': body.get('kb_id', ''),
+            'kb_region': body.get('kb_region', 'us-west-2'),
             'created_at': datetime.utcnow().isoformat(),
             'updated_at': datetime.utcnow().isoformat()
         }
@@ -93,6 +96,9 @@ def handle_list_prompts(event, cors_headers):
                 'prompt_content': item['prompt_content'],
                 'description': item.get('description', ''),
                 'is_active': item.get('is_active', True),
+                'rag_enabled': item.get('rag_enabled', False),
+                'kb_id': item.get('kb_id', ''),
+                'kb_region': item.get('kb_region', 'us-west-2'),
                 'created_at': item.get('created_at'),
                 'updated_at': item.get('updated_at')
             })
@@ -139,6 +145,9 @@ def handle_get_prompt(prompt_id, cors_headers):
             'prompt_content': item['prompt_content'],
             'description': item.get('description', ''),
             'is_active': item.get('is_active', True),
+            'rag_enabled': item.get('rag_enabled', False),
+            'kb_id': item.get('kb_id', ''),
+            'kb_region': item.get('kb_region', 'us-west-2'),
             'created_at': item.get('created_at'),
             'updated_at': item.get('updated_at')
         }
@@ -184,6 +193,18 @@ def handle_update_prompt(prompt_id, event, cors_headers):
             update_expr.append('is_active = :active')
             expr_values[':active'] = body['is_active']
 
+        if 'rag_enabled' in body:
+            update_expr.append('rag_enabled = :rag')
+            expr_values[':rag'] = body['rag_enabled']
+
+        if 'kb_id' in body:
+            update_expr.append('kb_id = :kb')
+            expr_values[':kb'] = body['kb_id']
+
+        if 'kb_region' in body:
+            update_expr.append('kb_region = :region')
+            expr_values[':region'] = body['kb_region']
+
         update_expr.append('updated_at = :updated')
         expr_values[':updated'] = datetime.utcnow().isoformat()
 
@@ -208,6 +229,9 @@ def handle_update_prompt(prompt_id, event, cors_headers):
             'prompt_content': item['prompt_content'],
             'description': item.get('description', ''),
             'is_active': item.get('is_active', True),
+            'rag_enabled': item.get('rag_enabled', False),
+            'kb_id': item.get('kb_id', ''),
+            'kb_region': item.get('kb_region', 'us-west-2'),
             'updated_at': item.get('updated_at')
         }
 

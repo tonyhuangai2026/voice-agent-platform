@@ -15,6 +15,7 @@ import { DynamoDBDocumentClient, QueryCommand, GetCommand } from '@aws-sdk/lib-d
 import { CallRecordManager } from './call-records';
 import { callLogger } from './call-logger';
 import { AudioRecorder } from './audio-recorder';
+import { setRagToolConfig, baseTools, ragTools } from './tools';
 // Farewell keywords that trigger automatic hangup
 const FAREWELL_KEYWORDS = ['have a great day', 'que tenga buen día'];
 
@@ -102,7 +103,14 @@ async function lookupCustomerByPhone(phoneNumber: string): Promise<{
     }
 }
 
-async function lookupPromptById(promptId: string): Promise<string | null> {
+interface PromptConfig {
+    prompt_content: string;
+    rag_enabled?: boolean;
+    kb_id?: string;
+    kb_region?: string;
+}
+
+async function lookupPromptById(promptId: string): Promise<PromptConfig | null> {
     try {
         const result = await ddbClient.send(new GetCommand({
             TableName: PROMPTS_TABLE,
@@ -110,8 +118,13 @@ async function lookupPromptById(promptId: string): Promise<string | null> {
         }));
 
         if (result.Item) {
-            console.log(`Prompt found: ${result.Item.prompt_name}`);
-            return result.Item.prompt_content;
+            console.log(`Prompt found: ${result.Item.prompt_name}, RAG: ${result.Item.rag_enabled ? 'enabled' : 'disabled'}`);
+            return {
+                prompt_content: result.Item.prompt_content,
+                rag_enabled: result.Item.rag_enabled || false,
+                kb_id: result.Item.kb_id || '',
+                kb_region: result.Item.kb_region || 'us-west-2'
+            };
         }
         console.log(`No prompt found for id: ${promptId}`);
         return null;
@@ -242,6 +255,9 @@ fastify.register(async (fastify) => {
         let retryCount = 0;
         const MAX_RETRIES = 2;
 
+        // RAG configuration (loaded during call start)
+        let ragConfig: { enabled: boolean; kb_id?: string; kb_region?: string } = { enabled: false };
+
         // Function to end the call via Twilio API
         const endCall = async (reason: string) => {
             if (callEnded || !callSid) return;
@@ -332,9 +348,13 @@ fastify.register(async (fastify) => {
                         // Don't setup prompt start here - wait for 'start' event to get voiceId parameter
                         break;
                     case 'start':
+                        // Extract callSid early for logging
+                        callSid = data.start.callSid;
+                        session.streamSid = data.streamSid;
+
                         // Extract customer phone from Twilio custom parameters
                         customerPhone = data.start?.customParameters?.customerPhone || '';
-                        console.log(`Stream start, customerPhone: ${customerPhone}`);
+                        console.log(`Stream start, callSid: ${callSid}, customerPhone: ${customerPhone}`);
 
                         // Look up customer info in DynamoDB (including voice_id and prompt_id)
                         let customer = null;
@@ -346,11 +366,30 @@ fastify.register(async (fastify) => {
 
                                 // Look up prompt configuration if customer has prompt_id
                                 let basePrompt = SYSTEM_PROMPT;
+                                let promptConfig: PromptConfig | null = null;
+
                                 if (customer.promptId) {
-                                    const promptContent = await lookupPromptById(customer.promptId);
-                                    if (promptContent) {
-                                        basePrompt = promptContent;
-                                        console.log(`Using custom prompt config: ${customer.promptId}`);
+                                    promptConfig = await lookupPromptById(customer.promptId);
+                                    if (promptConfig) {
+                                        basePrompt = promptConfig.prompt_content;
+                                        console.log(`Using custom prompt config: ${customer.promptId}, RAG: ${promptConfig.rag_enabled}`);
+
+                                        // Configure RAG tool if enabled
+                                        if (promptConfig.rag_enabled && promptConfig.kb_id) {
+                                            ragConfig = {
+                                                enabled: true,
+                                                kb_id: promptConfig.kb_id,
+                                                kb_region: promptConfig.kb_region || 'us-west-2'
+                                            };
+
+                                            // Set global RAG config for the tool
+                                            setRagToolConfig(ragConfig);
+
+                                            console.log(`[RAG] RAG tool enabled for this call: KB=${ragConfig.kb_id}, Region=${ragConfig.kb_region}`);
+
+                                            // Add tool usage instruction to base prompt
+                                            basePrompt += '\n\n[CRITICAL INSTRUCTION] You MUST use the searchKnowledgeBase tool whenever the user asks about:\n- Company policies (leave, overtime, reimbursement, etc.)\n- Working hours, schedules, or attendance\n- HR processes (onboarding, resignation, performance reviews)\n- IT support, equipment, or account requests\n- Office facilities or procedures\n- Training or benefits\n- ANY company-specific information\n\nDo NOT answer these questions from general knowledge - you MUST call searchKnowledgeBase first to get accurate, company-specific information. After receiving results, answer naturally without mentioning the tool or knowledge base.';
+                                        }
                                     }
                                 }
 
@@ -361,19 +400,30 @@ fastify.register(async (fastify) => {
                                     .replace(/\{\{notes\}\}/g, customer.notes || '');
 
                                 console.log(`Customer found: ${customer.customerName}, voiceId: ${voiceId}, using prompt: ${customer.promptId || 'default'}`);
+
+                                // Debug: Log if RAG instruction was added
+                                if (ragConfig.enabled) {
+                                    console.log(`[RAG] System prompt includes RAG instruction: ${enrichedPrompt.includes('searchKnowledgeBase')}`);
+                                    console.log(`[RAG] System prompt length: ${enrichedPrompt.length} chars, last 200: ${enrichedPrompt.substring(enrichedPrompt.length - 200)}`);
+                                }
                             }
                         }
 
                         console.log(`Final voiceId: ${voiceId}`);
 
-                        // Setup prompt start with voiceId (from customer DB, TwiML param, or default)
-                        await session.setupPromptStart(voiceId);
+                        // Prepare tools list based on RAG configuration
+                        const sessionTools = ragConfig.enabled
+                            ? [...baseTools, ...ragTools]  // Include RAG tool when enabled
+                            : baseTools;  // Only base tools when RAG disabled
 
+                        console.log(`Registering ${sessionTools.length} tools (RAG: ${ragConfig.enabled ? 'enabled' : 'disabled'})`);
+
+                        // Setup prompt start with voiceId and custom tools FIRST (critical for Nova session)
+                        await session.setupPromptStart(voiceId, sessionTools);
                         await session.setupSystemPrompt(undefined, enrichedPrompt);
                         await session.setupStartAudio();
 
-                        session.streamSid = data.streamSid;
-                        callSid = data.start.callSid; //call sid to update while redirecting it to SIP endpoint
+                        // callSid and streamSid already assigned earlier
                         audioRecorder = new AudioRecorder(callSid);
                         console.log(`Stream started streamSid: ${session.streamSid}, callSid: ${callSid}`);
 
@@ -547,9 +597,14 @@ fastify.register(async (fastify) => {
                 // 1. First add SessionStart by calling a setup method (if available)
                 // 2. Then add other events in order
 
+                // Prepare tools list based on RAG configuration (same as initial session)
+                const retrySessionTools = ragConfig.enabled
+                    ? [...baseTools, ...ragTools]
+                    : baseTools;
+
                 // Setup new session with conversation history
                 // Note: These will be queued, and SessionStart will be prepended by initiateSession
-                await newSession.setupPromptStart(voiceId);
+                await newSession.setupPromptStart(voiceId, retrySessionTools);
                 await newSession.setupSystemPrompt(undefined, retryPrompt);
                 await newSession.setupStartAudio();
 
@@ -604,12 +659,16 @@ fastify.register(async (fastify) => {
                 console.log(`contentStart: type=${data.type}, role=${data.role || ''}, stage=${lastGenerationStage}`);
             });
 
-            sess.onEvent('textOutput', (data) => {
+            sess.onEvent('textOutput', async (data) => {
                 if (lastGenerationStage === 'SPECULATIVE') return;
                 const role = data.role?.toLowerCase();
                 const content = data.content || '';
                 console.log(`[${role?.toUpperCase()}] ${content}`);
-                if (role === 'user') lastUserText = content;
+
+                if (role === 'user') {
+                    lastUserText = content;
+                    // RAG is now handled via tool calls - Nova will call searchKnowledgeBase tool when needed
+                }
                 else if (role === 'assistant') {
                     lastAssistantText = content;
                     // Check for farewell keywords to trigger hangup
@@ -719,6 +778,8 @@ fastify.register(async (fastify) => {
 
             sess.onEvent('toolUse', async (data) => {
                 console.log('Tool use detected:', data.toolName);
+
+                // Handle special case: support tool transfers call
                 if (data.toolName == 'support') {
                     console.log(`Transfering call id ${callSid}`);
                     try {
@@ -727,10 +788,56 @@ fastify.register(async (fastify) => {
                         console.log(error);
                     }
                 }
+
+                // Log RAG tool usage
+                if (data.toolName?.toLowerCase() === 'searchknowledgebase') {
+                    const query = data.content ? JSON.parse(data.content).query : 'unknown';
+                    console.log(`[RAG Tool] Nova is searching knowledge base for: "${query}"`);
+
+                    callLogger.info(callSid, 'rag-tool-called', `Nova called searchKnowledgeBase`, {
+                        query,
+                        toolUseId: data.toolUseId
+                    }).catch(err => console.error('Failed to log RAG tool call:', err));
+                }
             });
 
-            sess.onEvent('toolResult', (_data) => {
-                console.log('Tool result received');
+            sess.onEvent('toolResult', (data) => {
+                console.log('Tool result received:', data.toolUseId);
+
+                // Log RAG tool results
+                if (data.result) {
+                    try {
+                        const result = typeof data.result === 'string' ? JSON.parse(data.result) : data.result;
+
+                        if (result.documentsFound !== undefined) {
+                            // This is a RAG tool result
+                            console.log(`[RAG Tool] Retrieved ${result.documentsFound} documents in ${result.retrieveTimeMs}ms`);
+
+                            if (result.success && result.documents) {
+                                const retrievedDocs = result.documents.map((doc: any, idx: number) => ({
+                                    index: idx + 1,
+                                    relevance: doc.relevance,
+                                    preview: doc.content.substring(0, 150) + (doc.content.length > 150 ? '...' : ''),
+                                    source: doc.source
+                                }));
+
+                                callLogger.info(callSid, 'rag-tool-success', `RAG search successful - found ${result.documentsFound} documents`, {
+                                    query: result.query,
+                                    retrieveTime: `${result.retrieveTimeMs}ms`,
+                                    documentsFound: result.documentsFound,
+                                    documents: retrievedDocs
+                                }).catch(err => console.error('Failed to log RAG tool success:', err));
+                            } else {
+                                callLogger.warn(callSid, 'rag-tool-no-results', `RAG search returned no results`, {
+                                    query: result.query,
+                                    message: result.message
+                                }).catch(err => console.error('Failed to log RAG no results:', err));
+                            }
+                        }
+                    } catch (err) {
+                        console.error('[RAG Tool] Failed to parse tool result:', err);
+                    }
+                }
             });
 
             sess.onEvent('streamComplete', () => {

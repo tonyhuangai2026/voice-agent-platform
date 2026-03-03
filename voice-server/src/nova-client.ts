@@ -50,8 +50,8 @@ import {
       return this; // For chaining
     }
   
-    public async setupPromptStart(voiceId?: string): Promise<void> {
-      this.client.setupPromptStartEvent(this.sessionId, voiceId);
+    public async setupPromptStart(voiceId?: string, customTools?: any[]): Promise<void> {
+      this.client.setupPromptStartEvent(this.sessionId, voiceId, customTools);
     }
   
     public async setupSystemPrompt(
@@ -121,7 +121,7 @@ import {
       if (!this.isActive) return;
       await this.client.sendPromptEnd(this.sessionId);
     }
-  
+
     public async close(): Promise<void> {
       if (!this.isActive) return;
   
@@ -534,7 +534,7 @@ import {
       });
       session.queueSignal.next();
     }
-    public setupPromptStartEvent(sessionId: string, voiceId?: string): void {
+    public setupPromptStartEvent(sessionId: string, voiceId?: string, customTools?: any[]): void {
       console.log(`Setting up prompt start event for session ${sessionId}...`);
       const session = this.activeSessions.get(sessionId);
       if (!session) return;
@@ -544,7 +544,11 @@ import {
         ? { ...DefaultAudioOutputConfiguration, voiceId }
         : DefaultAudioOutputConfiguration;
 
+      // Use custom tools if provided, otherwise use default availableTools
+      const toolsToUse = customTools !== undefined ? customTools : availableTools;
+
       console.log(`Using voice: ${audioOutputConfig.voiceId}`);
+      console.log(`Registering ${toolsToUse.length} tools for this session`);
 
       // Prompt start event
       this.addEventToSessionQueue(sessionId, {
@@ -559,7 +563,7 @@ import {
               mediaType: "application/json",
             },
             toolConfiguration: {
-              tools: availableTools
+              tools: toolsToUse
             },
           },
         }
@@ -587,7 +591,7 @@ import {
           },
         }
       });
-  
+
       // Text input content
       this.addEventToSessionQueue(sessionId, {
         event: {
@@ -599,7 +603,7 @@ import {
           },
         }
       });
-  
+
       // Text content end
       this.addEventToSessionQueue(sessionId, {
         event: {
@@ -610,6 +614,8 @@ import {
         }
       });
     }
+
+    // RAG context injection removed - now handled via searchKnowledgeBase tool
   
     public setupStartAudioEvent(
       sessionId: string,

@@ -178,6 +178,9 @@ export interface PromptConfig {
   prompt_content: string;
   description: string;
   is_active: boolean;
+  rag_enabled?: boolean;
+  kb_id?: string;
+  kb_region?: string;
   created_at: string;
   updated_at: string;
 }

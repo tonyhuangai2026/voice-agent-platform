@@ -356,6 +356,7 @@ Resources:
                   - bedrock:InvokeModel
                   - bedrock:InvokeModelWithResponseStream
                   - bedrock:InvokeModelWithBidirectionalStream
+                  - bedrock:Retrieve
                 Resource: '*'
         - PolicyName: DynamoDBAccess
           PolicyDocument:

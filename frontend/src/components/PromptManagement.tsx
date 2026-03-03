@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
-import { Card, Table, Button, Space, Typography, Tag, message, Modal, Form, Input, Switch, Popconfirm } from 'antd';
-import { ReloadOutlined, PlusOutlined, EditOutlined, DeleteOutlined, FileTextOutlined, EyeOutlined } from '@ant-design/icons';
+import { Card, Table, Button, Space, Typography, Tag, message, Modal, Form, Input, Switch, Popconfirm, Select, Divider } from 'antd';
+import { ReloadOutlined, PlusOutlined, EditOutlined, DeleteOutlined, FileTextOutlined, EyeOutlined, DatabaseOutlined } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
 import dayjs from 'dayjs';
 import { listPrompts, createPrompt, updatePrompt, deletePrompt } from '../api';
@@ -49,7 +49,10 @@ export function PromptManagement() {
       prompt_name: prompt.prompt_name,
       prompt_content: prompt.prompt_content,
       description: prompt.description,
-      is_active: prompt.is_active
+      is_active: prompt.is_active,
+      rag_enabled: prompt.rag_enabled || false,
+      kb_id: prompt.kb_id || '',
+      kb_region: prompt.kb_region || 'us-west-2'
     });
     setModalVisible(true);
   };
@@ -128,6 +131,23 @@ export function PromptManagement() {
         <Tag color={active ? 'success' : 'default'}>
           {active ? 'Active' : 'Inactive'}
         </Tag>
+      ),
+    },
+    {
+      title: 'RAG',
+      dataIndex: 'rag_enabled',
+      key: 'rag_enabled',
+      render: (enabled: boolean, record: PromptConfig) => (
+        enabled ? (
+          <Space direction="vertical" size={0}>
+            <Tag color="blue" icon={<DatabaseOutlined />}>Enabled</Tag>
+            <Text type="secondary" style={{ fontSize: '11px' }}>
+              {record.kb_id}
+            </Text>
+          </Space>
+        ) : (
+          <Tag color="default">Disabled</Tag>
+        )
       ),
     },
     {
@@ -254,6 +274,54 @@ export function PromptManagement() {
             valuePropName="checked"
           >
             <Switch />
+          </Form.Item>
+
+          <Divider>
+            <Space>
+              <DatabaseOutlined />
+              RAG Knowledge Base (Optional)
+            </Space>
+          </Divider>
+
+          <Form.Item
+            name="rag_enabled"
+            label="Enable RAG"
+            valuePropName="checked"
+            tooltip="Retrieve relevant context from Knowledge Base before generating response"
+          >
+            <Switch />
+          </Form.Item>
+
+          <Form.Item
+            noStyle
+            shouldUpdate={(prevValues, currentValues) => prevValues.rag_enabled !== currentValues.rag_enabled}
+          >
+            {({ getFieldValue }) =>
+              getFieldValue('rag_enabled') ? (
+                <>
+                  <Form.Item
+                    name="kb_id"
+                    label="Knowledge Base ID"
+                    rules={[{ required: true, message: 'Please enter Knowledge Base ID' }]}
+                    tooltip="AWS Bedrock Knowledge Base ID (e.g., EWHFJVL4TN)"
+                  >
+                    <Input placeholder="EWHFJVL4TN" />
+                  </Form.Item>
+                  <Form.Item
+                    name="kb_region"
+                    label="KB Region"
+                    rules={[{ required: true, message: 'Please select region' }]}
+                  >
+                    <Select>
+                      <Select.Option value="us-east-1">us-east-1</Select.Option>
+                      <Select.Option value="us-west-2">us-west-2</Select.Option>
+                      <Select.Option value="eu-west-1">eu-west-1</Select.Option>
+                      <Select.Option value="ap-southeast-1">ap-southeast-1</Select.Option>
+                    </Select>
+                  </Form.Item>
+                </>
+              ) : null
+            }
           </Form.Item>
         </Form>
       </Modal>
