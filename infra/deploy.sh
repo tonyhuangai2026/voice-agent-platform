@@ -128,7 +128,7 @@ update_ecs_service() {
   log "Forcing new ECS deployment"
   aws ecs update-service \
     --cluster voice-agent-cluster \
-    --service voice-agent-service \
+    --service voice-agent-sip-service \
     --desired-count 1 \
     --force-new-deployment \
     --region "${AWS_REGION}" \

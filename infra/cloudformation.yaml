@@ -600,7 +600,7 @@ Resources:
   TargetGroup:
     Type: AWS::ElasticLoadBalancingV2::TargetGroup
     Properties:
-      Name: voice-agent-tg
+      Name: voice-agent-ec2-tg
       Port: 3000
       Protocol: HTTP
       VpcId: !Ref VPC
@@ -638,7 +638,7 @@ Resources:
       - ALBListener
       - ECSAutoScalingGroup
     Properties:
-      ServiceName: voice-agent-service
+      ServiceName: voice-agent-sip-service
       Cluster: !Ref ECSCluster
       TaskDefinition: !Ref TaskDefinition
       DesiredCount: 1
