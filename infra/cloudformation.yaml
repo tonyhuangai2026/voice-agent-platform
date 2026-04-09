@@ -1,28 +1,20 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Description: >
-  ECS Fargate + ALB + CloudFront deployment for Voice Agent Platform.
-  Provides a stable HTTPS/WSS endpoint for Twilio webhooks without requiring a custom domain.
+  ECS EC2 + ALB + CloudFront deployment for Voice Agent Platform.
+  Uses Amazon Chime SDK Voice Connector for SIP/RTP telephony.
 
 Parameters:
-  TwilioAccountSid:
+  ChimeVoiceConnectorHost:
     Type: String
-    NoEcho: true
-    Description: Twilio Account SID
-  TwilioApiSid:
+    Description: Chime Voice Connector outbound hostname (e.g. xxxxx.voiceconnector.chime.aws)
+  ChimePhoneNumber:
     Type: String
-    NoEcho: true
-    Description: Twilio API Key SID
-  TwilioApiSecret:
-    Type: String
-    NoEcho: true
-    Description: Twilio API Key Secret
-  TwilioFromNumber:
-    Type: String
-    Description: Twilio phone number (E.164 format, e.g. +1234567890)
-  TwilioVerifiedCallerId:
-    Type: String
-    Description: Verified caller ID for outbound calls (E.164 format)
+    Description: Chime phone number (E.164 format, e.g. +12025551234)
     Default: ''
+  ECSOptimizedAMI:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Default: /aws/service/ecs/optimized-ami/amazon-linux-2/recommended/image_id
+    Description: ECS-optimized AMI ID (auto-resolved from SSM)
   SipEndpoint:
     Type: String
     Description: SIP endpoint for call transfer (optional)
@@ -276,7 +268,7 @@ Resources:
   ECSSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
-      GroupDescription: Allow traffic from ALB to ECS tasks
+      GroupDescription: Allow traffic from ALB and SIP/RTP to ECS instance
       VpcId: !Ref VPC
       SecurityGroupIngress:
         - IpProtocol: tcp
@@ -284,29 +276,34 @@ Resources:
           ToPort: 3000
           SourceSecurityGroupId: !Ref ALBSecurityGroup
           Description: App port from ALB
-      SecurityGroupEgress:
-        - IpProtocol: tcp
-          FromPort: 443
-          ToPort: 443
+        - IpProtocol: udp
+          FromPort: 5060
+          ToPort: 5060
           CidrIp: 0.0.0.0/0
-          Description: HTTPS outbound (Bedrock, Twilio API, ECR, Secrets Manager)
+          Description: SIP signaling from Voice Connector
+        - IpProtocol: udp
+          FromPort: 10000
+          ToPort: 20000
+          CidrIp: 0.0.0.0/0
+          Description: RTP media from Voice Connector
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          CidrIp: 0.0.0.0/0
+          Description: All outbound (HTTPS for Bedrock/ECR, UDP for SIP/RTP)
       Tags:
         - Key: Name
           Value: voice-agent-ecs-sg
 
-  # Secrets Manager for Twilio credentials
-  TwilioSecret:
+  # Secrets Manager for Chime/SIP configuration
+  ChimeSecret:
     Type: AWS::SecretsManager::Secret
     Properties:
-      Name: voice-agent/twilio-credentials
-      Description: Twilio API credentials for Voice Agent Platform
+      Name: voice-agent/chime-credentials
+      Description: Chime Voice Connector configuration for Voice Agent Platform
       SecretString: !Sub |
         {
-          "TWILIO_ACCOUNT_SID": "${TwilioAccountSid}",
-          "TWILIO_API_SID": "${TwilioApiSid}",
-          "TWILIO_API_SECRET": "${TwilioApiSecret}",
-          "TWILIO_FROM_NUMBER": "${TwilioFromNumber}",
-          "TWILIO_VERIFIED_CALLER_ID": "${TwilioVerifiedCallerId}",
+          "CHIME_VOICE_CONNECTOR_HOST": "${ChimeVoiceConnectorHost}",
+          "CHIME_PHONE_NUMBER": "${ChimePhoneNumber}",
           "SIP_ENDPOINT": "${SipEndpoint}"
         }
 
@@ -332,7 +329,7 @@ Resources:
               - Effect: Allow
                 Action:
                   - secretsmanager:GetSecretValue
-                Resource: !Ref TwilioSecret
+                Resource: !Ref ChimeSecret
 
   # ECS Task Role (application permissions: Bedrock + DynamoDB)
   ECSTaskRole:
@@ -438,24 +435,99 @@ Resources:
         - Name: containerInsights
           Value: enabled
 
+  # Elastic IP for stable public address (required by Voice Connector Origination)
+  GatewayEIP:
+    Type: AWS::EC2::EIP
+    Properties:
+      Domain: vpc
+      Tags:
+        - Key: Name
+          Value: voice-agent-eip
+
+  # EC2 Instance Profile for ECS container instances
+  ECSInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Roles:
+        - !Ref ECSInstanceRole
+
+  ECSInstanceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: voice-agent-instance-role
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonEC2ContainerServiceforEC2Role
+      Policies:
+        - PolicyName: EIPAssociate
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ec2:AssociateAddress
+                  - ec2:DescribeAddresses
+                Resource: '*'
+
+  # Auto Scaling Group for EC2-backed ECS (HOST networking for SIP/RTP)
+  ECSAutoScalingGroup:
+    Type: AWS::AutoScaling::AutoScalingGroup
+    Properties:
+      MinSize: '1'
+      MaxSize: '1'
+      DesiredCapacity: '1'
+      VPCZoneIdentifier:
+        - !Ref PublicSubnet1
+        - !Ref PublicSubnet2
+      LaunchTemplate:
+        LaunchTemplateId: !Ref ECSLaunchTemplate
+        Version: !GetAtt ECSLaunchTemplate.LatestVersionNumber
+      Tags:
+        - Key: Name
+          Value: voice-agent-ecs-instance
+          PropagateAtLaunch: true
+
+  ECSLaunchTemplate:
+    Type: AWS::EC2::LaunchTemplate
+    Properties:
+      LaunchTemplateData:
+        InstanceType: t3.medium
+        ImageId: !Ref ECSOptimizedAMI
+        IamInstanceProfile:
+          Arn: !GetAtt ECSInstanceProfile.Arn
+        SecurityGroupIds:
+          - !Ref ECSSecurityGroup
+        UserData:
+          Fn::Base64: !Sub |
+            #!/bin/bash
+            echo ECS_CLUSTER=${ECSCluster} >> /etc/ecs/ecs.config
+            # Associate Elastic IP
+            TOKEN=$(curl -s -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 21600")
+            INSTANCE_ID=$(curl -s -H "X-aws-ec2-metadata-token: $TOKEN" http://169.254.169.254/latest/meta-data/instance-id)
+            aws ec2 associate-address --instance-id $INSTANCE_ID --allocation-id ${GatewayEIP.AllocationId} --region ${AWS::Region}
+
+
   TaskDefinition:
     Type: AWS::ECS::TaskDefinition
     Properties:
       Family: voice-agent-server
-      Cpu: !Ref TaskCpu
-      Memory: !Ref TaskMemory
-      NetworkMode: awsvpc
+      NetworkMode: host
       RequiresCompatibilities:
-        - FARGATE
+        - EC2
       ExecutionRoleArn: !GetAtt ECSTaskExecutionRole.Arn
       TaskRoleArn: !GetAtt ECSTaskRole.Arn
       ContainerDefinitions:
         - Name: voice-agent-server
           Image: !Sub '${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/voice-agent-server:${ImageTag}'
           Essential: true
-          PortMappings:
-            - ContainerPort: 3000
-              Protocol: tcp
+          Memory: 1024
+          Cpu: 1024
           Environment:
             - Name: PORT
               Value: '3000'
@@ -487,19 +559,19 @@ Resources:
               Value: !Ref AWS::Region
             - Name: RECORDING_BUCKET
               Value: !Ref RecordingBucket
+            - Name: PUBLIC_IP
+              Value: !GetAtt GatewayEIP.PublicIp
+            - Name: RTP_PORT_BASE
+              Value: '10000'
+            - Name: RTP_PORT_COUNT
+              Value: '10000'
           Secrets:
-            - Name: TWILIO_ACCOUNT_SID
-              ValueFrom: !Sub '${TwilioSecret}:TWILIO_ACCOUNT_SID::'
-            - Name: TWILIO_API_SID
-              ValueFrom: !Sub '${TwilioSecret}:TWILIO_API_SID::'
-            - Name: TWILIO_API_SECRET
-              ValueFrom: !Sub '${TwilioSecret}:TWILIO_API_SECRET::'
-            - Name: TWILIO_FROM_NUMBER
-              ValueFrom: !Sub '${TwilioSecret}:TWILIO_FROM_NUMBER::'
-            - Name: TWILIO_VERIFIED_CALLER_ID
-              ValueFrom: !Sub '${TwilioSecret}:TWILIO_VERIFIED_CALLER_ID::'
+            - Name: CHIME_VOICE_CONNECTOR_HOST
+              ValueFrom: !Sub '${ChimeSecret}:CHIME_VOICE_CONNECTOR_HOST::'
+            - Name: CHIME_PHONE_NUMBER
+              ValueFrom: !Sub '${ChimeSecret}:CHIME_PHONE_NUMBER::'
             - Name: SIP_ENDPOINT
-              ValueFrom: !Sub '${TwilioSecret}:SIP_ENDPOINT::'
+              ValueFrom: !Sub '${ChimeSecret}:SIP_ENDPOINT::'
           LogConfiguration:
             LogDriver: awslogs
             Options:
@@ -532,7 +604,7 @@ Resources:
       Port: 3000
       Protocol: HTTP
       VpcId: !Ref VPC
-      TargetType: ip
+      TargetType: instance
       HealthCheckPath: /
       HealthCheckIntervalSeconds: 30
       HealthCheckTimeoutSeconds: 10
@@ -562,28 +634,18 @@ Resources:
 
   ECSService:
     Type: AWS::ECS::Service
-    DependsOn: ALBListener
+    DependsOn:
+      - ALBListener
+      - ECSAutoScalingGroup
     Properties:
       ServiceName: voice-agent-service
       Cluster: !Ref ECSCluster
       TaskDefinition: !Ref TaskDefinition
       DesiredCount: 1
-      LaunchType: FARGATE
-      NetworkConfiguration:
-        AwsvpcConfiguration:
-          AssignPublicIp: DISABLED
-          Subnets:
-            - !Ref PrivateSubnet1
-            - !Ref PrivateSubnet2
-          SecurityGroups:
-            - !Ref ECSSecurityGroup
-      LoadBalancers:
-        - ContainerName: voice-agent-server
-          ContainerPort: 3000
-          TargetGroupArn: !Ref TargetGroup
+      LaunchType: EC2
       DeploymentConfiguration:
-        MaximumPercent: 200
-        MinimumHealthyPercent: 100
+        MaximumPercent: 100
+        MinimumHealthyPercent: 0
       HealthCheckGracePeriodSeconds: 60
 
   # ===== CloudFront =====
@@ -1035,8 +1097,12 @@ Resources:
 
 Outputs:
   CloudFrontDomain:
-    Description: CloudFront domain name - configure this as Twilio webhook URL
+    Description: CloudFront domain name for frontend
     Value: !Sub 'https://${CloudFrontDistribution.DomainName}'
+
+  GatewayPublicIP:
+    Description: Elastic IP for the VoIP gateway - use this for Voice Connector Origination config
+    Value: !GetAtt GatewayEIP.PublicIp
 
   ECRRepositoryUri:
     Description: ECR repository URI for docker push
