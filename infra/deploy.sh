@@ -68,19 +68,12 @@ get_stack_output() {
 deploy_stack() {
   log "Deploying CloudFormation stack: ${STACK_NAME}"
 
-  # Prompt for Twilio credentials if not set
-  if [ -z "${TWILIO_ACCOUNT_SID:-}" ]; then
-    read -rp "TWILIO_ACCOUNT_SID: " TWILIO_ACCOUNT_SID
+  # Prompt for Chime Voice Connector config if not set
+  if [ -z "${CHIME_VOICE_CONNECTOR_HOST:-}" ]; then
+    read -rp "CHIME_VOICE_CONNECTOR_HOST (e.g. xxxxx.voiceconnector.chime.aws): " CHIME_VOICE_CONNECTOR_HOST
   fi
-  if [ -z "${TWILIO_API_SID:-}" ]; then
-    read -rp "TWILIO_API_SID: " TWILIO_API_SID
-  fi
-  if [ -z "${TWILIO_API_SECRET:-}" ]; then
-    read -rsp "TWILIO_API_SECRET: " TWILIO_API_SECRET
-    echo
-  fi
-  if [ -z "${TWILIO_FROM_NUMBER:-}" ]; then
-    read -rp "TWILIO_FROM_NUMBER: " TWILIO_FROM_NUMBER
+  if [ -z "${CHIME_PHONE_NUMBER:-}" ]; then
+    read -rp "CHIME_PHONE_NUMBER (e.g. +12025551234): " CHIME_PHONE_NUMBER
   fi
 
   aws cloudformation deploy \
@@ -89,11 +82,8 @@ deploy_stack() {
     --region "${AWS_REGION}" \
     --capabilities CAPABILITY_NAMED_IAM \
     --parameter-overrides \
-      TwilioAccountSid="${TWILIO_ACCOUNT_SID}" \
-      TwilioApiSid="${TWILIO_API_SID}" \
-      TwilioApiSecret="${TWILIO_API_SECRET}" \
-      TwilioFromNumber="${TWILIO_FROM_NUMBER}" \
-      TwilioVerifiedCallerId="${TWILIO_VERIFIED_CALLER_ID:-}" \
+      ChimeVoiceConnectorHost="${CHIME_VOICE_CONNECTOR_HOST}" \
+      ChimePhoneNumber="${CHIME_PHONE_NUMBER}" \
       SipEndpoint="${SIP_ENDPOINT:-}" \
       AwsRegion="${AWS_REGION}" \
       ImageTag="${IMAGE_TAG}" \
