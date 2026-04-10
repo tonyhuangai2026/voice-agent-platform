@@ -1,237 +1,195 @@
-<?xml version="1.0" encoding="UTF-8"?>
-<svg width="1200" height="850" xmlns="http://www.w3.org/2000/svg">
-  <defs>
-    <style>
-      .box { fill: #ffffff; stroke: #333; stroke-width: 2; }
-      .service { fill: #667eea; stroke: #333; stroke-width: 2; }
-      .aws { fill: #FF9900; stroke: #333; stroke-width: 2; }
-      .db { fill: #3b82f6; stroke: #333; stroke-width: 2; }
-      .chime { fill: #232f3e; stroke: #333; stroke-width: 2; }
-      .text { font-family: Arial, sans-serif; font-size: 14px; fill: #333; }
-      .title { font-family: Arial, sans-serif; font-size: 16px; font-weight: bold; fill: #fff; }
-      .arrow { stroke: #666; stroke-width: 2; fill: none; marker-end: url(#arrowhead); }
-      .arrow-both { stroke: #666; stroke-width: 2; fill: none; marker-end: url(#arrowhead); marker-start: url(#arrowtail); }
-      .label { font-family: Arial, sans-serif; font-size: 12px; fill: #666; }
-    </style>
-    <marker id="arrowhead" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto">
-      <polygon points="0 0, 10 3, 0 6" fill="#666" />
-    </marker>
-    <marker id="arrowtail" markerWidth="10" markerHeight="10" refX="1" refY="3" orient="auto">
-      <polygon points="10 0, 0 3, 10 6" fill="#666" />
-    </marker>
-  </defs>
+<svg width="1200" height="800" xmlns="http://www.w3.org/2000/svg">
 
   <!-- Title -->
-  <text x="600" y="30" text-anchor="middle" class="text" style="font-size: 24px; font-weight: bold;">Voice Agent Platform - System Architecture</text>
-  <text x="600" y="52" text-anchor="middle" class="label" style="font-size: 13px;">Amazon Chime SDK Voice Connector + Nova Sonic + SIP/RTP</text>
+  <text x="600" y="30" text-anchor="middle" font-family="Arial, sans-serif" font-size="24" font-weight="bold" fill="#333">Voice Agent Platform - System Architecture</text>
+  <text x="600" y="52" text-anchor="middle" font-family="Arial, sans-serif" font-size="13" fill="#666">Amazon Chime SDK Voice Connector + Nova Sonic + SIP/RTP</text>
 
-  <!-- ===== Left Column: Frontend + API ===== -->
+  <!-- Caller -->
+  <circle cx="100" cy="130" r="40" fill="#6366f1" stroke="#333" stroke-width="2"/>
+  <text x="100" y="125" text-anchor="middle" font-family="Arial" font-size="14" font-weight="bold" fill="#fff">Caller</text>
+  <text x="100" y="142" text-anchor="middle" font-family="Arial" font-size="11" fill="#ddd">PSTN Phone</text>
 
-  <!-- User -->
-  <g id="user">
-    <circle cx="100" cy="130" r="40" fill="#6366f1" stroke="#333" stroke-width="2"/>
-    <text x="100" y="125" text-anchor="middle" class="title" style="font-size: 14px;">Caller</text>
-    <text x="100" y="142" text-anchor="middle" class="label" style="fill: #fff; font-size: 11px;">PSTN Phone</text>
-  </g>
-
-  <!-- Browser User -->
-  <g id="browser-user">
-    <circle cx="100" cy="350" r="40" fill="#6366f1" stroke="#333" stroke-width="2"/>
-    <text x="100" y="345" text-anchor="middle" class="title" style="font-size: 14px;">Admin</text>
-    <text x="100" y="362" text-anchor="middle" class="label" style="fill: #fff; font-size: 11px;">Browser</text>
-  </g>
+  <!-- Admin -->
+  <circle cx="100" cy="350" r="40" fill="#6366f1" stroke="#333" stroke-width="2"/>
+  <text x="100" y="345" text-anchor="middle" font-family="Arial" font-size="14" font-weight="bold" fill="#fff">Admin</text>
+  <text x="100" y="362" text-anchor="middle" font-family="Arial" font-size="11" fill="#ddd">Browser</text>
 
   <!-- Chime Voice Connector -->
-  <g id="chime-vc">
-    <rect x="230" y="85" width="240" height="90" rx="10" class="chime"/>
-    <text x="350" y="115" text-anchor="middle" class="title">Chime Voice Connector</text>
-    <text x="350" y="135" text-anchor="middle" class="label" style="fill: #ff9900;">PSTN Gateway</text>
-    <text x="350" y="155" text-anchor="middle" class="label" style="fill: #ccc;">Phone Number + SIP Routing</text>
-  </g>
+  <rect x="230" y="85" width="240" height="90" rx="10" fill="#232f3e" stroke="#333" stroke-width="2"/>
+  <text x="350" y="115" text-anchor="middle" font-family="Arial" font-size="15" font-weight="bold" fill="#fff">Chime Voice Connector</text>
+  <text x="350" y="135" text-anchor="middle" font-family="Arial" font-size="12" fill="#ff9900">PSTN Gateway</text>
+  <text x="350" y="155" text-anchor="middle" font-family="Arial" font-size="11" fill="#aaa">Phone Number + SIP Routing</text>
 
-  <!-- Frontend (CloudFront + S3) -->
-  <g id="frontend">
-    <rect x="230" y="290" width="240" height="80" rx="10" class="service"/>
-    <text x="350" y="320" text-anchor="middle" class="title">Frontend</text>
-    <text x="350" y="340" text-anchor="middle" class="label" style="fill: #fff;">React + Ant Design</text>
-    <text x="350" y="355" text-anchor="middle" class="label" style="fill: #fff;">CloudFront + S3</text>
-  </g>
+  <!-- Frontend -->
+  <rect x="230" y="290" width="240" height="80" rx="10" fill="#667eea" stroke="#333" stroke-width="2"/>
+  <text x="350" y="320" text-anchor="middle" font-family="Arial" font-size="16" font-weight="bold" fill="#fff">Frontend</text>
+  <text x="350" y="340" text-anchor="middle" font-family="Arial" font-size="12" fill="#ddd">React + Ant Design</text>
+  <text x="350" y="355" text-anchor="middle" font-family="Arial" font-size="12" fill="#ddd">CloudFront + S3</text>
 
   <!-- API Gateway + Lambda -->
-  <g id="api">
-    <rect x="230" y="430" width="240" height="100" rx="10" class="aws"/>
-    <text x="350" y="460" text-anchor="middle" class="title">API Gateway + Lambda</text>
-    <text x="350" y="485" text-anchor="middle" class="label" style="fill: #fff;">Python Backend</text>
-    <text x="350" y="505" text-anchor="middle" class="label" style="fill: #fff;">Auth, CRUD, AI Labeling</text>
-  </g>
-
-  <!-- ===== Center: Voice Server ===== -->
+  <rect x="230" y="430" width="240" height="100" rx="10" fill="#FF9900" stroke="#333" stroke-width="2"/>
+  <text x="350" y="460" text-anchor="middle" font-family="Arial" font-size="15" font-weight="bold" fill="#fff">API Gateway + Lambda</text>
+  <text x="350" y="485" text-anchor="middle" font-family="Arial" font-size="12" fill="#fff">Python Backend</text>
+  <text x="350" y="505" text-anchor="middle" font-family="Arial" font-size="12" fill="#fff">Auth, CRUD, AI Labeling</text>
 
   <!-- ECS EC2 Voice Server -->
-  <g id="ecs">
-    <rect x="560" y="85" width="260" height="200" rx="10" class="service"/>
-    <text x="690" y="115" text-anchor="middle" class="title">ECS EC2 (HOST Network)</text>
-    <rect x="575" y="130" width="230" height="140" rx="8" fill="rgba(255,255,255,0.15)" stroke="rgba(255,255,255,0.3)"/>
-    <text x="690" y="155" text-anchor="middle" class="title" style="font-size: 14px;">Voice Server</text>
-    <text x="690" y="175" text-anchor="middle" class="label" style="fill: #ddd;">Node.js + TypeScript</text>
-    <text x="690" y="195" text-anchor="middle" class="label" style="fill: #ddd;">SIP Server (UDP:5060)</text>
-    <text x="690" y="215" text-anchor="middle" class="label" style="fill: #ddd;">RTP Audio (UDP:10000+)</text>
-    <text x="690" y="235" text-anchor="middle" class="label" style="fill: #ddd;">Nova Sonic Client</text>
-    <text x="690" y="255" text-anchor="middle" class="label" style="fill: #ddd;">Live Transcript (SSE)</text>
-  </g>
+  <rect x="560" y="85" width="260" height="200" rx="10" fill="#667eea" stroke="#333" stroke-width="2"/>
+  <text x="690" y="112" text-anchor="middle" font-family="Arial" font-size="15" font-weight="bold" fill="#fff">ECS EC2 (HOST Network)</text>
+  <rect x="575" y="125" width="230" height="145" rx="8" fill="none" stroke="rgba(255,255,255,0.4)" stroke-width="1" stroke-dasharray="4,3"/>
+  <text x="690" y="150" text-anchor="middle" font-family="Arial" font-size="14" font-weight="bold" fill="#fff">Voice Server</text>
+  <text x="690" y="170" text-anchor="middle" font-family="Arial" font-size="12" fill="#ddd">Node.js + TypeScript</text>
+  <text x="690" y="190" text-anchor="middle" font-family="Arial" font-size="12" fill="#ddd">SIP Server (UDP:5060)</text>
+  <text x="690" y="210" text-anchor="middle" font-family="Arial" font-size="12" fill="#ddd">RTP Audio (UDP:10000+)</text>
+  <text x="690" y="230" text-anchor="middle" font-family="Arial" font-size="12" fill="#ddd">Nova Sonic Client</text>
+  <text x="690" y="250" text-anchor="middle" font-family="Arial" font-size="12" fill="#ddd">Live Transcript (SSE)</text>
 
   <!-- Elastic IP badge -->
-  <g id="eip">
-    <rect x="745" y="72" width="80" height="22" rx="5" fill="#e74c3c" stroke="none"/>
-    <text x="785" y="87" text-anchor="middle" style="font-family: Arial; font-size: 11px; fill: #fff; font-weight: bold;">Elastic IP</text>
-  </g>
+  <rect x="745" y="72" width="80" height="22" rx="5" fill="#e74c3c" stroke="none"/>
+  <text x="785" y="87" text-anchor="middle" font-family="Arial" font-size="11" fill="#fff" font-weight="bold">Elastic IP</text>
 
-  <!-- ===== Right Column: AWS Services ===== -->
-
-  <!-- Bedrock / Nova Sonic -->
-  <g id="bedrock">
-    <rect x="910" y="85" width="230" height="100" rx="10" class="aws"/>
-    <text x="1025" y="115" text-anchor="middle" class="title">Amazon Bedrock</text>
-    <text x="1025" y="140" text-anchor="middle" class="label" style="fill: #fff;">Nova Sonic v1</text>
-    <text x="1025" y="158" text-anchor="middle" class="label" style="fill: #fff;">Real-time Voice AI</text>
-    <text x="1025" y="176" text-anchor="middle" class="label" style="fill: #fff;">Bidirectional Stream</text>
-  </g>
+  <!-- Bedrock Nova Sonic -->
+  <rect x="910" y="85" width="230" height="100" rx="10" fill="#FF9900" stroke="#333" stroke-width="2"/>
+  <text x="1025" y="115" text-anchor="middle" font-family="Arial" font-size="15" font-weight="bold" fill="#fff">Amazon Bedrock</text>
+  <text x="1025" y="138" text-anchor="middle" font-family="Arial" font-size="12" fill="#fff">Nova Sonic v1</text>
+  <text x="1025" y="156" text-anchor="middle" font-family="Arial" font-size="12" fill="#fff">Real-time Voice AI</text>
+  <text x="1025" y="174" text-anchor="middle" font-family="Arial" font-size="12" fill="#fff">Bidirectional Stream</text>
 
   <!-- DynamoDB -->
-  <g id="dynamodb">
-    <rect x="560" y="350" width="260" height="130" rx="10" class="db"/>
-    <text x="690" y="380" text-anchor="middle" class="title">DynamoDB</text>
-    <text x="620" y="405" text-anchor="middle" class="label" style="fill: #fff;">customers</text>
-    <text x="760" y="405" text-anchor="middle" class="label" style="fill: #fff;">prompts</text>
-    <text x="620" y="425" text-anchor="middle" class="label" style="fill: #fff;">call-records</text>
-    <text x="760" y="425" text-anchor="middle" class="label" style="fill: #fff;">projects</text>
-    <text x="620" y="445" text-anchor="middle" class="label" style="fill: #fff;">users</text>
-    <text x="760" y="445" text-anchor="middle" class="label" style="fill: #fff;">labels</text>
-    <text x="690" y="465" text-anchor="middle" class="label" style="fill: #fff;">call-logs (TTL 30d)</text>
-  </g>
+  <rect x="560" y="350" width="260" height="130" rx="10" fill="#3b82f6" stroke="#333" stroke-width="2"/>
+  <text x="690" y="378" text-anchor="middle" font-family="Arial" font-size="16" font-weight="bold" fill="#fff">DynamoDB</text>
+  <text x="620" y="402" text-anchor="middle" font-family="Arial" font-size="11" fill="#ddd">customers</text>
+  <text x="760" y="402" text-anchor="middle" font-family="Arial" font-size="11" fill="#ddd">prompts</text>
+  <text x="620" y="422" text-anchor="middle" font-family="Arial" font-size="11" fill="#ddd">call-records</text>
+  <text x="760" y="422" text-anchor="middle" font-family="Arial" font-size="11" fill="#ddd">projects</text>
+  <text x="620" y="442" text-anchor="middle" font-family="Arial" font-size="11" fill="#ddd">users</text>
+  <text x="760" y="442" text-anchor="middle" font-family="Arial" font-size="11" fill="#ddd">labels</text>
+  <text x="690" y="465" text-anchor="middle" font-family="Arial" font-size="11" fill="#ddd">call-logs (TTL 30d)</text>
 
   <!-- S3 -->
-  <g id="s3">
-    <rect x="910" y="350" width="230" height="80" rx="10" class="aws"/>
-    <text x="1025" y="380" text-anchor="middle" class="title">S3</text>
-    <text x="1025" y="400" text-anchor="middle" class="label" style="fill: #fff;">Call Recordings (WAV)</text>
-    <text x="1025" y="418" text-anchor="middle" class="label" style="fill: #fff;">Frontend Static Files</text>
-  </g>
+  <rect x="910" y="350" width="230" height="80" rx="10" fill="#FF9900" stroke="#333" stroke-width="2"/>
+  <text x="1025" y="380" text-anchor="middle" font-family="Arial" font-size="16" font-weight="bold" fill="#fff">S3</text>
+  <text x="1025" y="400" text-anchor="middle" font-family="Arial" font-size="12" fill="#fff">Call Recordings (WAV)</text>
+  <text x="1025" y="418" text-anchor="middle" font-family="Arial" font-size="12" fill="#fff">Frontend Static Files</text>
 
-  <!-- Claude -->
-  <g id="claude">
-    <rect x="910" y="470" width="230" height="60" rx="10" class="aws"/>
-    <text x="1025" y="497" text-anchor="middle" class="title">Bedrock (Claude)</text>
-    <text x="1025" y="518" text-anchor="middle" class="label" style="fill: #fff;">AI Auto-Labeling</text>
-  </g>
+  <!-- Bedrock Claude -->
+  <rect x="910" y="470" width="230" height="60" rx="10" fill="#FF9900" stroke="#333" stroke-width="2"/>
+  <text x="1025" y="497" text-anchor="middle" font-family="Arial" font-size="15" font-weight="bold" fill="#fff">Bedrock (Claude)</text>
+  <text x="1025" y="518" text-anchor="middle" font-family="Arial" font-size="12" fill="#fff">AI Auto-Labeling</text>
 
-  <!-- ===== Arrows ===== -->
+  <!-- ===== Arrows (simple lines with triangle heads) ===== -->
 
   <!-- Caller to Chime VC -->
-  <path d="M 140,130 L 230,130" class="arrow"/>
-  <text x="175" y="122" class="label">PSTN</text>
+  <line x1="140" y1="130" x2="225" y2="130" stroke="#666" stroke-width="2"/>
+  <polygon points="225,126 235,130 225,134" fill="#666"/>
+  <text x="180" y="122" font-family="Arial" font-size="12" fill="#666">PSTN</text>
 
-  <!-- Chime VC to ECS (SIP) -->
-  <path d="M 470,130 L 560,130" class="arrow-both"/>
-  <text x="505" y="120" class="label">SIP/RTP</text>
-  <text x="505" y="135" class="label" style="font-size:10px;">UDP</text>
+  <!-- Chime VC to ECS (bidirectional) -->
+  <line x1="470" y1="130" x2="555" y2="130" stroke="#666" stroke-width="2"/>
+  <polygon points="555,126 565,130 555,134" fill="#666"/>
+  <polygon points="475,126 465,130 475,134" fill="#666"/>
+  <text x="510" y="120" font-family="Arial" font-size="12" fill="#666">SIP/RTP</text>
+  <text x="510" y="145" font-family="Arial" font-size="10" fill="#999">UDP</text>
 
-  <!-- ECS to Bedrock -->
-  <path d="M 820,135 L 910,135" class="arrow-both"/>
-  <text x="855" y="125" class="label">Audio</text>
-  <text x="855" y="140" class="label" style="font-size:10px;">Stream</text>
+  <!-- ECS to Bedrock (bidirectional) -->
+  <line x1="820" y1="135" x2="905" y2="135" stroke="#666" stroke-width="2"/>
+  <polygon points="905,131 915,135 905,139" fill="#666"/>
+  <polygon points="825,131 815,135 825,139" fill="#666"/>
+  <text x="860" y="125" font-family="Arial" font-size="12" fill="#666">Audio</text>
+  <text x="860" y="150" font-family="Arial" font-size="10" fill="#999">Stream</text>
 
-  <!-- Browser to Frontend -->
-  <path d="M 140,340 L 230,330" class="arrow"/>
-  <text x="175" y="328" class="label">HTTPS</text>
+  <!-- Admin to Frontend -->
+  <line x1="140" y1="340" x2="225" y2="330" stroke="#666" stroke-width="2"/>
+  <polygon points="223,325 233,330 225,335" fill="#666"/>
+  <text x="175" y="328" font-family="Arial" font-size="12" fill="#666">HTTPS</text>
 
   <!-- Frontend to API -->
-  <path d="M 350,370 L 350,430" class="arrow"/>
-  <text x="365" y="405" class="label">REST</text>
+  <line x1="350" y1="370" x2="350" y2="425" stroke="#666" stroke-width="2"/>
+  <polygon points="346,425 350,435 354,425" fill="#666"/>
+  <text x="365" y="405" font-family="Arial" font-size="12" fill="#666">REST</text>
 
   <!-- Frontend to ECS (SSE) -->
-  <path d="M 470,310 L 560,240" class="arrow"/>
-  <text x="530" y="265" class="label">SSE</text>
+  <line x1="470" y1="310" x2="555" y2="245" stroke="#666" stroke-width="2"/>
+  <polygon points="552,240 562,243 556,250" fill="#666"/>
+  <text x="525" y="268" font-family="Arial" font-size="12" fill="#666">SSE</text>
 
   <!-- API to DynamoDB -->
-  <path d="M 470,480 L 560,430" class="arrow"/>
-  <text x="505" y="448" class="label">CRUD</text>
+  <line x1="470" y1="475" x2="555" y2="425" stroke="#666" stroke-width="2"/>
+  <polygon points="552,420 562,423 556,430" fill="#666"/>
+  <text x="505" y="443" font-family="Arial" font-size="12" fill="#666">CRUD</text>
 
   <!-- ECS to DynamoDB -->
-  <path d="M 690,285 L 690,350" class="arrow"/>
-  <text x="705" y="320" class="label">Records</text>
+  <line x1="690" y1="285" x2="690" y2="345" stroke="#666" stroke-width="2"/>
+  <polygon points="686,345 690,355 694,345" fill="#666"/>
+  <text x="705" y="320" font-family="Arial" font-size="12" fill="#666">Records</text>
 
   <!-- ECS to S3 -->
-  <path d="M 820,260 L 910,380" class="arrow"/>
-  <text x="880" y="310" class="label">WAV</text>
+  <line x1="820" y1="260" x2="905" y2="375" stroke="#666" stroke-width="2"/>
+  <polygon points="902,370 912,378 905,381" fill="#666"/>
+  <text x="875" y="310" font-family="Arial" font-size="12" fill="#666">WAV</text>
 
   <!-- API to Claude -->
-  <path d="M 470,510 L 910,500" class="arrow"/>
-  <text x="680" y="498" class="label">Auto-label</text>
-
-  <!-- API to DynamoDB (direct) -->
-  <path d="M 470,460 L 560,420" class="arrow"/>
+  <line x1="470" y1="510" x2="905" y2="500" stroke="#666" stroke-width="2"/>
+  <polygon points="905,496 915,500 905,504" fill="#666"/>
+  <text x="680" y="498" font-family="Arial" font-size="12" fill="#666">Auto-label</text>
 
   <!-- ===== Call Flow ===== -->
-  <g id="callflow">
-    <rect x="50" y="570" width="1100" height="160" rx="10" style="fill: #f8f9fa; stroke: #ddd; stroke-width: 2;"/>
-    <text x="600" y="598" text-anchor="middle" class="text" style="font-size: 16px; font-weight: bold;">Inbound Call Flow</text>
+  <rect x="50" y="560" width="1100" height="155" rx="10" fill="#f8f9fa" stroke="#ddd" stroke-width="2"/>
+  <text x="600" y="588" text-anchor="middle" font-family="Arial" font-size="16" font-weight="bold" fill="#333">Inbound Call Flow</text>
 
-    <!-- Flow boxes -->
-    <rect x="80" y="615" width="140" height="45" rx="8" fill="#232f3e" stroke="none"/>
-    <text x="150" y="635" text-anchor="middle" style="font-family: Arial; font-size: 11px; fill: #ff9900; font-weight: bold;">1. PSTN Call</text>
-    <text x="150" y="650" text-anchor="middle" style="font-family: Arial; font-size: 10px; fill: #ccc;">Caller dials number</text>
+  <!-- Step 1 -->
+  <rect x="80" y="605" width="140" height="45" rx="8" fill="#232f3e"/>
+  <text x="150" y="625" text-anchor="middle" font-family="Arial" font-size="11" font-weight="bold" fill="#ff9900">1. PSTN Call</text>
+  <text x="150" y="640" text-anchor="middle" font-family="Arial" font-size="10" fill="#ccc">Caller dials number</text>
 
-    <path d="M 220,637 L 250,637" class="arrow"/>
+  <line x1="220" y1="627" x2="248" y2="627" stroke="#666" stroke-width="2"/>
+  <polygon points="248,623 258,627 248,631" fill="#666"/>
 
-    <rect x="250" y="615" width="160" height="45" rx="8" fill="#232f3e" stroke="none"/>
-    <text x="330" y="635" text-anchor="middle" style="font-family: Arial; font-size: 11px; fill: #ff9900; font-weight: bold;">2. SIP INVITE</text>
-    <text x="330" y="650" text-anchor="middle" style="font-family: Arial; font-size: 10px; fill: #ccc;">Voice Connector routes</text>
+  <!-- Step 2 -->
+  <rect x="258" y="605" width="150" height="45" rx="8" fill="#232f3e"/>
+  <text x="333" y="625" text-anchor="middle" font-family="Arial" font-size="11" font-weight="bold" fill="#ff9900">2. SIP INVITE</text>
+  <text x="333" y="640" text-anchor="middle" font-family="Arial" font-size="10" fill="#ccc">Voice Connector routes</text>
 
-    <path d="M 410,637 L 440,637" class="arrow"/>
+  <line x1="408" y1="627" x2="436" y2="627" stroke="#666" stroke-width="2"/>
+  <polygon points="436,623 446,627 436,631" fill="#666"/>
 
-    <rect x="440" y="615" width="160" height="45" rx="8" fill="#667eea" stroke="none"/>
-    <text x="520" y="635" text-anchor="middle" style="font-family: Arial; font-size: 11px; fill: #fff; font-weight: bold;">3. Answer + RTP</text>
-    <text x="520" y="650" text-anchor="middle" style="font-family: Arial; font-size: 10px; fill: #ddd;">200 OK, audio bridge</text>
+  <!-- Step 3 -->
+  <rect x="446" y="605" width="150" height="45" rx="8" fill="#667eea"/>
+  <text x="521" y="625" text-anchor="middle" font-family="Arial" font-size="11" font-weight="bold" fill="#fff">3. Answer + RTP</text>
+  <text x="521" y="640" text-anchor="middle" font-family="Arial" font-size="10" fill="#ddd">200 OK, audio bridge</text>
 
-    <path d="M 600,637 L 630,637" class="arrow"/>
+  <line x1="596" y1="627" x2="624" y2="627" stroke="#666" stroke-width="2"/>
+  <polygon points="624,623 634,627 624,631" fill="#666"/>
 
-    <rect x="630" y="615" width="160" height="45" rx="8" fill="#FF9900" stroke="none"/>
-    <text x="710" y="635" text-anchor="middle" style="font-family: Arial; font-size: 11px; fill: #fff; font-weight: bold;">4. Nova Sonic AI</text>
-    <text x="710" y="650" text-anchor="middle" style="font-family: Arial; font-size: 10px; fill: #fff;">Real-time conversation</text>
+  <!-- Step 4 -->
+  <rect x="634" y="605" width="150" height="45" rx="8" fill="#FF9900"/>
+  <text x="709" y="625" text-anchor="middle" font-family="Arial" font-size="11" font-weight="bold" fill="#fff">4. Nova Sonic AI</text>
+  <text x="709" y="640" text-anchor="middle" font-family="Arial" font-size="10" fill="#fff">Real-time conversation</text>
 
-    <path d="M 790,637 L 820,637" class="arrow"/>
+  <line x1="784" y1="627" x2="812" y2="627" stroke="#666" stroke-width="2"/>
+  <polygon points="812,623 822,627 812,631" fill="#666"/>
 
-    <rect x="820" y="615" width="160" height="45" rx="8" fill="#3b82f6" stroke="none"/>
-    <text x="900" y="635" text-anchor="middle" style="font-family: Arial; font-size: 11px; fill: #fff; font-weight: bold;">5. Save Records</text>
-    <text x="900" y="650" text-anchor="middle" style="font-family: Arial; font-size: 10px; fill: #ddd;">DynamoDB + S3</text>
+  <!-- Step 5 -->
+  <rect x="822" y="605" width="150" height="45" rx="8" fill="#3b82f6"/>
+  <text x="897" y="625" text-anchor="middle" font-family="Arial" font-size="11" font-weight="bold" fill="#fff">5. Save Records</text>
+  <text x="897" y="640" text-anchor="middle" font-family="Arial" font-size="10" fill="#ddd">DynamoDB + S3</text>
 
-    <!-- Bottom detail -->
-    <text x="600" y="695" text-anchor="middle" class="label" style="font-size: 12px;">Audio: PCMU (G.711 u-law) at 8000 Hz | SIP signaling on UDP:5060 | RTP media on UDP:10000-20000</text>
-    <text x="600" y="715" text-anchor="middle" class="label" style="font-size: 12px;">Barge-in supported | Customer lookup + custom prompts + RAG | Call recording to S3</text>
-  </g>
+  <!-- Flow detail -->
+  <text x="600" y="680" text-anchor="middle" font-family="Arial" font-size="12" fill="#666">Audio: PCMU (G.711 u-law) 8kHz | SIP: UDP:5060 | RTP: UDP:10000-20000</text>
+  <text x="600" y="700" text-anchor="middle" font-family="Arial" font-size="12" fill="#666">Barge-in supported | Customer prompts + RAG | Call recording to S3</text>
 
   <!-- Legend -->
-  <g id="legend">
-    <rect x="50" y="745" width="1100" height="40" rx="5" fill="none" stroke="#ddd"/>
-    <text x="80" y="770" class="text" style="font-weight: bold; font-size: 13px;">Legend:</text>
-
-    <rect x="155" y="758" width="15" height="15" rx="3" fill="#667eea"/>
-    <text x="178" y="770" class="label">Application</text>
-
-    <rect x="265" y="758" width="15" height="15" rx="3" fill="#FF9900"/>
-    <text x="288" y="770" class="label">AWS Service</text>
-
-    <rect x="385" y="758" width="15" height="15" rx="3" fill="#3b82f6"/>
-    <text x="408" y="770" class="label">Database</text>
-
-    <rect x="480" y="758" width="15" height="15" rx="3" fill="#232f3e"/>
-    <text x="503" y="770" class="label">Chime SDK</text>
-
-    <rect x="590" y="758" width="15" height="15" rx="3" fill="#e74c3c"/>
-    <text x="613" y="770" class="label">Elastic IP</text>
-
-    <rect x="695" y="758" width="15" height="15" rx="3" fill="#6366f1"/>
-    <text x="718" y="770" class="label">User/Caller</text>
-  </g>
+  <rect x="50" y="730" width="1100" height="40" rx="5" fill="none" stroke="#ddd"/>
+  <text x="80" y="755" font-family="Arial" font-size="13" font-weight="bold" fill="#333">Legend:</text>
+  <rect x="155" y="743" width="15" height="15" rx="3" fill="#667eea"/>
+  <text x="178" y="755" font-family="Arial" font-size="12" fill="#666">Application</text>
+  <rect x="270" y="743" width="15" height="15" rx="3" fill="#FF9900"/>
+  <text x="293" y="755" font-family="Arial" font-size="12" fill="#666">AWS Service</text>
+  <rect x="385" y="743" width="15" height="15" rx="3" fill="#3b82f6"/>
+  <text x="408" y="755" font-family="Arial" font-size="12" fill="#666">Database</text>
+  <rect x="480" y="743" width="15" height="15" rx="3" fill="#232f3e"/>
+  <text x="503" y="755" font-family="Arial" font-size="12" fill="#666">Chime SDK</text>
+  <rect x="590" y="743" width="15" height="15" rx="3" fill="#e74c3c"/>
+  <text x="613" y="755" font-family="Arial" font-size="12" fill="#666">Elastic IP</text>
+  <rect x="695" y="743" width="15" height="15" rx="3" fill="#6366f1"/>
+  <text x="718" y="755" font-family="Arial" font-size="12" fill="#666">User/Caller</text>
 </svg>
