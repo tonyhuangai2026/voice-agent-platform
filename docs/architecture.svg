@@ -1,191 +1,237 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<svg width="1200" height="800" xmlns="http://www.w3.org/2000/svg">
+<svg width="1200" height="850" xmlns="http://www.w3.org/2000/svg">
   <defs>
     <style>
       .box { fill: #ffffff; stroke: #333; stroke-width: 2; }
       .service { fill: #667eea; stroke: #333; stroke-width: 2; }
       .aws { fill: #FF9900; stroke: #333; stroke-width: 2; }
       .db { fill: #3b82f6; stroke: #333; stroke-width: 2; }
-      .external { fill: #10b981; stroke: #333; stroke-width: 2; }
+      .chime { fill: #232f3e; stroke: #333; stroke-width: 2; }
       .text { font-family: Arial, sans-serif; font-size: 14px; fill: #333; }
       .title { font-family: Arial, sans-serif; font-size: 16px; font-weight: bold; fill: #fff; }
       .arrow { stroke: #666; stroke-width: 2; fill: none; marker-end: url(#arrowhead); }
+      .arrow-both { stroke: #666; stroke-width: 2; fill: none; marker-end: url(#arrowhead); marker-start: url(#arrowtail); }
       .label { font-family: Arial, sans-serif; font-size: 12px; fill: #666; }
     </style>
     <marker id="arrowhead" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto">
       <polygon points="0 0, 10 3, 0 6" fill="#666" />
     </marker>
+    <marker id="arrowtail" markerWidth="10" markerHeight="10" refX="1" refY="3" orient="auto">
+      <polygon points="10 0, 0 3, 10 6" fill="#666" />
+    </marker>
   </defs>
 
   <!-- Title -->
   <text x="600" y="30" text-anchor="middle" class="text" style="font-size: 24px; font-weight: bold;">Voice Agent Platform - System Architecture</text>
+  <text x="600" y="52" text-anchor="middle" class="label" style="font-size: 13px;">Amazon Chime SDK Voice Connector + Nova Sonic + SIP/RTP</text>
 
-  <!-- User & Browser -->
+  <!-- ===== Left Column: Frontend + API ===== -->
+
+  <!-- User -->
   <g id="user">
-    <circle cx="100" cy="100" r="40" class="external"/>
-    <text x="100" y="105" text-anchor="middle" class="title">User</text>
+    <circle cx="100" cy="130" r="40" fill="#6366f1" stroke="#333" stroke-width="2"/>
+    <text x="100" y="125" text-anchor="middle" class="title" style="font-size: 14px;">Caller</text>
+    <text x="100" y="142" text-anchor="middle" class="label" style="fill: #fff; font-size: 11px;">PSTN Phone</text>
   </g>
 
-  <!-- Frontend -->
+  <!-- Browser User -->
+  <g id="browser-user">
+    <circle cx="100" cy="350" r="40" fill="#6366f1" stroke="#333" stroke-width="2"/>
+    <text x="100" y="345" text-anchor="middle" class="title" style="font-size: 14px;">Admin</text>
+    <text x="100" y="362" text-anchor="middle" class="label" style="fill: #fff; font-size: 11px;">Browser</text>
+  </g>
+
+  <!-- Chime Voice Connector -->
+  <g id="chime-vc">
+    <rect x="230" y="85" width="240" height="90" rx="10" class="chime"/>
+    <text x="350" y="115" text-anchor="middle" class="title">Chime Voice Connector</text>
+    <text x="350" y="135" text-anchor="middle" class="label" style="fill: #ff9900;">PSTN Gateway</text>
+    <text x="350" y="155" text-anchor="middle" class="label" style="fill: #ccc;">Phone Number + SIP Routing</text>
+  </g>
+
+  <!-- Frontend (CloudFront + S3) -->
   <g id="frontend">
-    <rect x="250" y="60" width="200" height="80" rx="10" class="service"/>
-    <text x="350" y="90" text-anchor="middle" class="title">Frontend</text>
-    <text x="350" y="110" text-anchor="middle" class="label" style="fill: #fff;">React + TypeScript</text>
-    <text x="350" y="125" text-anchor="middle" class="label" style="fill: #fff;">Ant Design</text>
+    <rect x="230" y="290" width="240" height="80" rx="10" class="service"/>
+    <text x="350" y="320" text-anchor="middle" class="title">Frontend</text>
+    <text x="350" y="340" text-anchor="middle" class="label" style="fill: #fff;">React + Ant Design</text>
+    <text x="350" y="355" text-anchor="middle" class="label" style="fill: #fff;">CloudFront + S3</text>
   </g>
 
-  <!-- CloudFront -->
-  <g id="cloudfront">
-    <rect x="250" y="180" width="200" height="60" rx="10" class="aws"/>
-    <text x="350" y="205" text-anchor="middle" class="title">CloudFront</text>
-    <text x="350" y="225" text-anchor="middle" class="label" style="fill: #fff;">CDN + SSL</text>
+  <!-- API Gateway + Lambda -->
+  <g id="api">
+    <rect x="230" y="430" width="240" height="100" rx="10" class="aws"/>
+    <text x="350" y="460" text-anchor="middle" class="title">API Gateway + Lambda</text>
+    <text x="350" y="485" text-anchor="middle" class="label" style="fill: #fff;">Python Backend</text>
+    <text x="350" y="505" text-anchor="middle" class="label" style="fill: #fff;">Auth, CRUD, AI Labeling</text>
   </g>
 
-  <!-- S3 -->
-  <g id="s3">
-    <rect x="500" y="180" width="150" height="60" rx="10" class="aws"/>
-    <text x="575" y="205" text-anchor="middle" class="title">S3</text>
-    <text x="575" y="225" text-anchor="middle" class="label" style="fill: #fff;">Static Hosting</text>
+  <!-- ===== Center: Voice Server ===== -->
+
+  <!-- ECS EC2 Voice Server -->
+  <g id="ecs">
+    <rect x="560" y="85" width="260" height="200" rx="10" class="service"/>
+    <text x="690" y="115" text-anchor="middle" class="title">ECS EC2 (HOST Network)</text>
+    <rect x="575" y="130" width="230" height="140" rx="8" fill="rgba(255,255,255,0.15)" stroke="rgba(255,255,255,0.3)"/>
+    <text x="690" y="155" text-anchor="middle" class="title" style="font-size: 14px;">Voice Server</text>
+    <text x="690" y="175" text-anchor="middle" class="label" style="fill: #ddd;">Node.js + TypeScript</text>
+    <text x="690" y="195" text-anchor="middle" class="label" style="fill: #ddd;">SIP Server (UDP:5060)</text>
+    <text x="690" y="215" text-anchor="middle" class="label" style="fill: #ddd;">RTP Audio (UDP:10000+)</text>
+    <text x="690" y="235" text-anchor="middle" class="label" style="fill: #ddd;">Nova Sonic Client</text>
+    <text x="690" y="255" text-anchor="middle" class="label" style="fill: #ddd;">Live Transcript (SSE)</text>
   </g>
 
-  <!-- API Gateway -->
-  <g id="apigateway">
-    <rect x="250" y="300" width="200" height="80" rx="10" class="aws"/>
-    <text x="350" y="330" text-anchor="middle" class="title">API Gateway</text>
-    <text x="350" y="350" text-anchor="middle" class="label" style="fill: #fff;">REST API</text>
-    <text x="350" y="365" text-anchor="middle" class="label" style="fill: #fff;">Authentication</text>
+  <!-- Elastic IP badge -->
+  <g id="eip">
+    <rect x="745" y="72" width="80" height="22" rx="5" fill="#e74c3c" stroke="none"/>
+    <text x="785" y="87" text-anchor="middle" style="font-family: Arial; font-size: 11px; fill: #fff; font-weight: bold;">Elastic IP</text>
   </g>
 
-  <!-- Lambda -->
-  <g id="lambda">
-    <rect x="250" y="420" width="200" height="100" rx="10" class="aws"/>
-    <text x="350" y="450" text-anchor="middle" class="title">Lambda</text>
-    <text x="350" y="470" text-anchor="middle" class="label" style="fill: #fff;">Backend API</text>
-    <text x="350" y="485" text-anchor="middle" class="label" style="fill: #fff;">Python</text>
-    <text x="350" y="500" text-anchor="middle" class="label" style="fill: #fff;">Auth + Business Logic</text>
+  <!-- ===== Right Column: AWS Services ===== -->
+
+  <!-- Bedrock / Nova Sonic -->
+  <g id="bedrock">
+    <rect x="910" y="85" width="230" height="100" rx="10" class="aws"/>
+    <text x="1025" y="115" text-anchor="middle" class="title">Amazon Bedrock</text>
+    <text x="1025" y="140" text-anchor="middle" class="label" style="fill: #fff;">Nova Sonic v1</text>
+    <text x="1025" y="158" text-anchor="middle" class="label" style="fill: #fff;">Real-time Voice AI</text>
+    <text x="1025" y="176" text-anchor="middle" class="label" style="fill: #fff;">Bidirectional Stream</text>
   </g>
 
   <!-- DynamoDB -->
   <g id="dynamodb">
-    <rect x="500" y="420" width="150" height="100" rx="10" class="db"/>
-    <text x="575" y="450" text-anchor="middle" class="title">DynamoDB</text>
-    <text x="575" y="470" text-anchor="middle" class="label" style="fill: #fff;">Users</text>
-    <text x="575" y="485" text-anchor="middle" class="label" style="fill: #fff;">Customers</text>
-    <text x="575" y="500" text-anchor="middle" class="label" style="fill: #fff;">Call Records</text>
+    <rect x="560" y="350" width="260" height="130" rx="10" class="db"/>
+    <text x="690" y="380" text-anchor="middle" class="title">DynamoDB</text>
+    <text x="620" y="405" text-anchor="middle" class="label" style="fill: #fff;">customers</text>
+    <text x="760" y="405" text-anchor="middle" class="label" style="fill: #fff;">prompts</text>
+    <text x="620" y="425" text-anchor="middle" class="label" style="fill: #fff;">call-records</text>
+    <text x="760" y="425" text-anchor="middle" class="label" style="fill: #fff;">projects</text>
+    <text x="620" y="445" text-anchor="middle" class="label" style="fill: #fff;">users</text>
+    <text x="760" y="445" text-anchor="middle" class="label" style="fill: #fff;">labels</text>
+    <text x="690" y="465" text-anchor="middle" class="label" style="fill: #fff;">call-logs (TTL 30d)</text>
   </g>
 
-  <!-- ECS / Voice Server -->
-  <g id="ecs">
-    <rect x="700" y="300" width="220" height="150" rx="10" class="service"/>
-    <text x="810" y="330" text-anchor="middle" class="title">ECS Fargate</text>
-    <text x="810" y="355" text-anchor="middle" class="label" style="fill: #fff;">Voice Server</text>
-    <text x="810" y="375" text-anchor="middle" class="label" style="fill: #fff;">Node.js + TypeScript</text>
-    <text x="810" y="395" text-anchor="middle" class="label" style="fill: #fff;">WebSocket Handler</text>
-    <text x="810" y="415" text-anchor="middle" class="label" style="fill: #fff;">Call Logging</text>
-    <text x="810" y="435" text-anchor="middle" class="label" style="fill: #fff;">Real-time Transcript</text>
+  <!-- S3 -->
+  <g id="s3">
+    <rect x="910" y="350" width="230" height="80" rx="10" class="aws"/>
+    <text x="1025" y="380" text-anchor="middle" class="title">S3</text>
+    <text x="1025" y="400" text-anchor="middle" class="label" style="fill: #fff;">Call Recordings (WAV)</text>
+    <text x="1025" y="418" text-anchor="middle" class="label" style="fill: #fff;">Frontend Static Files</text>
   </g>
 
-  <!-- Twilio -->
-  <g id="twilio">
-    <rect x="700" y="100" width="220" height="80" rx="10" class="external"/>
-    <text x="810" y="130" text-anchor="middle" class="title">Twilio</text>
-    <text x="810" y="150" text-anchor="middle" class="label" style="fill: #fff;">Voice Calls</text>
-    <text x="810" y="165" text-anchor="middle" class="label" style="fill: #fff;">Media Streams</text>
+  <!-- Claude -->
+  <g id="claude">
+    <rect x="910" y="470" width="230" height="60" rx="10" class="aws"/>
+    <text x="1025" y="497" text-anchor="middle" class="title">Bedrock (Claude)</text>
+    <text x="1025" y="518" text-anchor="middle" class="label" style="fill: #fff;">AI Auto-Labeling</text>
   </g>
 
-  <!-- Bedrock / Nova Sonic -->
-  <g id="bedrock">
-    <rect x="950" y="300" width="200" height="100" rx="10" class="aws"/>
-    <text x="1050" y="330" text-anchor="middle" class="title">Amazon Bedrock</text>
-    <text x="1050" y="355" text-anchor="middle" class="label" style="fill: #fff;">Nova Sonic</text>
-    <text x="1050" y="375" text-anchor="middle" class="label" style="fill: #fff;">Voice-to-Voice AI</text>
-    <text x="1050" y="395" text-anchor="middle" class="label" style="fill: #fff;">Real-time</text>
-  </g>
+  <!-- ===== Arrows ===== -->
 
-  <!-- ALB -->
-  <g id="alb">
-    <rect x="700" y="500" width="220" height="60" rx="10" class="aws"/>
-    <text x="810" y="525" text-anchor="middle" class="title">Application Load Balancer</text>
-    <text x="810" y="545" text-anchor="middle" class="label" style="fill: #fff;">WebSocket Support</text>
-  </g>
+  <!-- Caller to Chime VC -->
+  <path d="M 140,130 L 230,130" class="arrow"/>
+  <text x="175" y="122" class="label">PSTN</text>
 
-  <!-- ECR -->
-  <g id="ecr">
-    <rect x="950" y="450" width="150" height="60" rx="10" class="aws"/>
-    <text x="1025" y="475" text-anchor="middle" class="title">ECR</text>
-    <text x="1025" y="495" text-anchor="middle" class="label" style="fill: #fff;">Docker Images</text>
-  </g>
-
-  <!-- Arrows -->
-  <!-- User to Frontend -->
-  <path d="M 140,100 L 250,100" class="arrow"/>
-  <text x="195" y="95" class="label">HTTPS</text>
-
-  <!-- Frontend to CloudFront -->
-  <path d="M 350,140 L 350,180" class="arrow"/>
-
-  <!-- CloudFront to S3 -->
-  <path d="M 450,210 L 500,210" class="arrow"/>
-
-  <!-- Frontend to API Gateway -->
-  <path d="M 350,240 L 350,300" class="arrow"/>
-  <text x="365" y="270" class="label">REST API</text>
-
-  <!-- API Gateway to Lambda -->
-  <path d="M 350,380 L 350,420" class="arrow"/>
-
-  <!-- Lambda to DynamoDB -->
-  <path d="M 450,470 L 500,470" class="arrow"/>
-  <text x="465" y="465" class="label">CRUD</text>
-
-  <!-- Frontend to ECS -->
-  <path d="M 450,100 L 700,375" class="arrow"/>
-  <text x="560" y="220" class="label">WebSocket</text>
-
-  <!-- Twilio to ECS -->
-  <path d="M 810,180 L 810,300" class="arrow"/>
-  <text x="820" y="240" class="label">Media Stream</text>
+  <!-- Chime VC to ECS (SIP) -->
+  <path d="M 470,130 L 560,130" class="arrow-both"/>
+  <text x="505" y="120" class="label">SIP/RTP</text>
+  <text x="505" y="135" class="label" style="font-size:10px;">UDP</text>
 
   <!-- ECS to Bedrock -->
-  <path d="M 920,375 L 950,350" class="arrow"/>
-  <text x="925" y="360" class="label">Audio</text>
+  <path d="M 820,135 L 910,135" class="arrow-both"/>
+  <text x="855" y="125" class="label">Audio</text>
+  <text x="855" y="140" class="label" style="font-size:10px;">Stream</text>
+
+  <!-- Browser to Frontend -->
+  <path d="M 140,340 L 230,330" class="arrow"/>
+  <text x="175" y="328" class="label">HTTPS</text>
+
+  <!-- Frontend to API -->
+  <path d="M 350,370 L 350,430" class="arrow"/>
+  <text x="365" y="405" class="label">REST</text>
+
+  <!-- Frontend to ECS (SSE) -->
+  <path d="M 470,310 L 560,240" class="arrow"/>
+  <text x="530" y="265" class="label">SSE</text>
+
+  <!-- API to DynamoDB -->
+  <path d="M 470,480 L 560,430" class="arrow"/>
+  <text x="505" y="448" class="label">CRUD</text>
 
   <!-- ECS to DynamoDB -->
-  <path d="M 700,450 L 650,470" class="arrow"/>
-  <text x="660" y="460" class="label">Logs</text>
+  <path d="M 690,285 L 690,350" class="arrow"/>
+  <text x="705" y="320" class="label">Records</text>
 
-  <!-- ECS to ALB -->
-  <path d="M 810,450 L 810,500" class="arrow"/>
+  <!-- ECS to S3 -->
+  <path d="M 820,260 L 910,380" class="arrow"/>
+  <text x="880" y="310" class="label">WAV</text>
 
-  <!-- ECR to ECS -->
-  <path d="M 1025,450 L 920,380" class="arrow"/>
-  <text x="960" y="415" class="label">Pull Image</text>
+  <!-- API to Claude -->
+  <path d="M 470,510 L 910,500" class="arrow"/>
+  <text x="680" y="498" class="label">Auto-label</text>
 
-  <!-- Customer Call Flow -->
+  <!-- API to DynamoDB (direct) -->
+  <path d="M 470,460 L 560,420" class="arrow"/>
+
+  <!-- ===== Call Flow ===== -->
   <g id="callflow">
-    <rect x="50" y="620" width="1100" height="150" rx="10" style="fill: #f0f0f0; stroke: #999; stroke-width: 2; stroke-dasharray: 5,5;"/>
-    <text x="600" y="645" text-anchor="middle" class="text" style="font-size: 16px; font-weight: bold;">Call Flow</text>
+    <rect x="50" y="570" width="1100" height="160" rx="10" style="fill: #f8f9fa; stroke: #ddd; stroke-width: 2;"/>
+    <text x="600" y="598" text-anchor="middle" class="text" style="font-size: 16px; font-weight: bold;">Inbound Call Flow</text>
 
-    <text x="70" y="670" class="label">1. Customer receives call via Twilio</text>
-    <text x="70" y="690" class="label">2. Twilio streams audio to Voice Server (WebSocket)</text>
-    <text x="70" y="710" class="label">3. Voice Server processes with Nova Sonic (real-time voice AI)</text>
-    <text x="70" y="730" class="label">4. AI response streamed back to customer</text>
-    <text x="70" y="750" class="label">5. Call logs and transcripts saved to DynamoDB</text>
+    <!-- Flow boxes -->
+    <rect x="80" y="615" width="140" height="45" rx="8" fill="#232f3e" stroke="none"/>
+    <text x="150" y="635" text-anchor="middle" style="font-family: Arial; font-size: 11px; fill: #ff9900; font-weight: bold;">1. PSTN Call</text>
+    <text x="150" y="650" text-anchor="middle" style="font-family: Arial; font-size: 10px; fill: #ccc;">Caller dials number</text>
+
+    <path d="M 220,637 L 250,637" class="arrow"/>
+
+    <rect x="250" y="615" width="160" height="45" rx="8" fill="#232f3e" stroke="none"/>
+    <text x="330" y="635" text-anchor="middle" style="font-family: Arial; font-size: 11px; fill: #ff9900; font-weight: bold;">2. SIP INVITE</text>
+    <text x="330" y="650" text-anchor="middle" style="font-family: Arial; font-size: 10px; fill: #ccc;">Voice Connector routes</text>
+
+    <path d="M 410,637 L 440,637" class="arrow"/>
+
+    <rect x="440" y="615" width="160" height="45" rx="8" fill="#667eea" stroke="none"/>
+    <text x="520" y="635" text-anchor="middle" style="font-family: Arial; font-size: 11px; fill: #fff; font-weight: bold;">3. Answer + RTP</text>
+    <text x="520" y="650" text-anchor="middle" style="font-family: Arial; font-size: 10px; fill: #ddd;">200 OK, audio bridge</text>
+
+    <path d="M 600,637 L 630,637" class="arrow"/>
+
+    <rect x="630" y="615" width="160" height="45" rx="8" fill="#FF9900" stroke="none"/>
+    <text x="710" y="635" text-anchor="middle" style="font-family: Arial; font-size: 11px; fill: #fff; font-weight: bold;">4. Nova Sonic AI</text>
+    <text x="710" y="650" text-anchor="middle" style="font-family: Arial; font-size: 10px; fill: #fff;">Real-time conversation</text>
+
+    <path d="M 790,637 L 820,637" class="arrow"/>
+
+    <rect x="820" y="615" width="160" height="45" rx="8" fill="#3b82f6" stroke="none"/>
+    <text x="900" y="635" text-anchor="middle" style="font-family: Arial; font-size: 11px; fill: #fff; font-weight: bold;">5. Save Records</text>
+    <text x="900" y="650" text-anchor="middle" style="font-family: Arial; font-size: 10px; fill: #ddd;">DynamoDB + S3</text>
+
+    <!-- Bottom detail -->
+    <text x="600" y="695" text-anchor="middle" class="label" style="font-size: 12px;">Audio: PCMU (G.711 u-law) at 8000 Hz | SIP signaling on UDP:5060 | RTP media on UDP:10000-20000</text>
+    <text x="600" y="715" text-anchor="middle" class="label" style="font-size: 12px;">Barge-in supported | Customer lookup + custom prompts + RAG | Call recording to S3</text>
   </g>
 
   <!-- Legend -->
   <g id="legend">
-    <text x="50" y="590" class="text" style="font-weight: bold;">Components:</text>
-    <rect x="150" y="575" width="80" height="20" rx="5" class="service"/>
-    <text x="190" y="590" text-anchor="middle" class="label">Application</text>
+    <rect x="50" y="745" width="1100" height="40" rx="5" fill="none" stroke="#ddd"/>
+    <text x="80" y="770" class="text" style="font-weight: bold; font-size: 13px;">Legend:</text>
 
-    <rect x="250" y="575" width="60" height="20" rx="5" class="aws"/>
-    <text x="280" y="590" text-anchor="middle" class="label">AWS</text>
+    <rect x="155" y="758" width="15" height="15" rx="3" fill="#667eea"/>
+    <text x="178" y="770" class="label">Application</text>
 
-    <rect x="330" y="575" width="70" height="20" rx="5" class="db"/>
-    <text x="365" y="590" text-anchor="middle" class="label">Database</text>
+    <rect x="265" y="758" width="15" height="15" rx="3" fill="#FF9900"/>
+    <text x="288" y="770" class="label">AWS Service</text>
 
-    <rect x="420" y="575" width="70" height="20" rx="5" class="external"/>
-    <text x="455" y="590" text-anchor="middle" class="label">External</text>
+    <rect x="385" y="758" width="15" height="15" rx="3" fill="#3b82f6"/>
+    <text x="408" y="770" class="label">Database</text>
+
+    <rect x="480" y="758" width="15" height="15" rx="3" fill="#232f3e"/>
+    <text x="503" y="770" class="label">Chime SDK</text>
+
+    <rect x="590" y="758" width="15" height="15" rx="3" fill="#e74c3c"/>
+    <text x="613" y="770" class="label">Elastic IP</text>
+
+    <rect x="695" y="758" width="15" height="15" rx="3" fill="#6366f1"/>
+    <text x="718" y="770" class="label">User/Caller</text>
   </g>
 </svg>
