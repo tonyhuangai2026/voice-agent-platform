@@ -202,7 +202,8 @@ export class SipServer extends EventEmitter {
     const viaHeader = msg.headers['via'] || '';
     const cseqHeader = msg.headers['cseq'] || '';
 
-    console.log(`[SIP] Received INVITE, Call-ID: ${callId}, From: ${fromHeader}`);
+    console.log(`[SIP] Received INVITE, Call-ID: ${callId}, From: ${fromHeader}, UDP source: ${fromIp}:${fromPort}`);
+    console.log(`[SIP] Via headers: ${msg.rawHeaders.filter(h => h.toLowerCase().startsWith('via:')).join(' | ')}`);
 
     // Check if this is a re-INVITE (existing dialog)
     if (this.dialogs.has(callId)) {
@@ -339,6 +340,22 @@ export class SipServer extends EventEmitter {
     }
   }
 
+  /**
+   * Extract Via and Record-Route headers from the raw INVITE headers
+   * to echo them correctly in responses (preserves order and multiplicity).
+   */
+  private getEchoHeaders(msg: SipMessage): string[] {
+    const lines: string[] = [];
+    for (const line of msg.rawHeaders) {
+      const lowerLine = line.toLowerCase();
+      if (lowerLine.startsWith('via:') || lowerLine.startsWith('v:') ||
+          lowerLine.startsWith('record-route:')) {
+        lines.push(line);
+      }
+    }
+    return lines;
+  }
+
   private send200Ok(msg: SipMessage, toIp: string, toPort: number, sdpBody: string, localTag: string): void {
     const toHeader = msg.headers['to'] || '';
     const toWithTag = toHeader.includes(';tag=') ? toHeader : `${toHeader};tag=${localTag}`;
@@ -346,8 +363,8 @@ export class SipServer extends EventEmitter {
     const response = buildSipResponse({
       statusCode: 200,
       reasonPhrase: 'OK',
+      rawHeaderLines: this.getEchoHeaders(msg),
       headers: {
-        'Via': msg.headers['via'] || '',
         'From': msg.headers['from'] || '',
         'To': toWithTag,
         'Call-ID': msg.headers['call-id'] || '',
@@ -367,8 +384,8 @@ export class SipServer extends EventEmitter {
     const response = buildSipResponse({
       statusCode,
       reasonPhrase,
+      rawHeaderLines: this.getEchoHeaders(msg),
       headers: {
-        'Via': msg.headers['via'] || '',
         'From': msg.headers['from'] || '',
         'To': msg.headers['to'] || '',
         'Call-ID': msg.headers['call-id'] || '',
@@ -382,6 +399,9 @@ export class SipServer extends EventEmitter {
 
   private sendSip(message: string, ip: string, port: number): void {
     if (!this.socket) return;
+    // Log outbound SIP message (first 3 lines for debugging)
+    const preview = message.split('\r\n').slice(0, 5).join(' | ');
+    console.log(`[SIP] >>> Sending to ${ip}:${port}: ${preview}`);
     const buf = Buffer.from(message, 'utf-8');
     this.socket.send(buf, port, ip, (err) => {
       if (err) console.error(`[SIP] Send error to ${ip}:${port}:`, err.message);

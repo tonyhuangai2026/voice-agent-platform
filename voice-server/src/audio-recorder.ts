@@ -23,7 +23,7 @@ export class AudioRecorder {
     this.callSid = callSid;
   }
 
-  /** Append decoded PCM from the customer (Twilio inbound) side */
+  /** Append decoded PCM from the customer (inbound) side */
   appendCustomerAudio(pcm: Buffer): void {
     if (this.finalized) return;
     this.customerChunks.push(pcm);
@@ -38,7 +38,7 @@ export class AudioRecorder {
   appendAiAudio(pcm: Buffer): void {
     if (this.finalized) return;
 
-    // Customer audio streams continuously from Twilio (even during silence),
+    // Customer audio streams continuously from RTP (even during silence),
     // so customerBytes reflects the true elapsed time of the call.
     // AI audio only arrives in bursts when the AI speaks.
     // Pad the AI buffer with silence to align to the current time position.

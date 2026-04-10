@@ -108,6 +108,13 @@ export class RtpSession {
     this.outboundQueue.push(pcmBuffer);
   }
 
+  /**
+   * Clear outbound audio queue (used when Nova Sonic interrupts/barge-in).
+   */
+  clearQueue(): void {
+    this.outboundQueue = [];
+  }
+
   getLocalPort(): number {
     return this.localPort;
   }

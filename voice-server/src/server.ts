@@ -169,7 +169,6 @@ fastify.get('/', async (request, reply) => {
 
 /**
  * SIP incoming call handler.
- * Replaces the Twilio WebSocket /media-stream handler.
  * Called when Voice Connector sends a SIP INVITE and the call is accepted.
  */
 async function handleIncomingCall(call: IncomingCallInfo): Promise<void> {
@@ -182,7 +181,7 @@ async function handleIncomingCall(call: IncomingCallInfo): Promise<void> {
     const session: StreamSession = bedrockClient.createStreamSession(sessionId);
     bedrockClient.initiateSession(sessionId);
 
-    // Use callId as the call identifier (replaces Twilio's callSid)
+    // Use SIP Call-ID as the call identifier
     const callSid = callId;
     session.streamSid = sessionId;
 
@@ -491,6 +490,12 @@ async function handleIncomingCall(call: IncomingCallInfo): Promise<void> {
 
         sess.onEvent('contentEnd', async (data) => {
             console.log(`contentEnd: type=${lastContentType}, stage=${lastGenerationStage}, stopReason=${data["stopReason"] || 'none'}`);
+
+            // Handle barge-in: clear outbound audio buffer so user doesn't hear stale AI audio
+            if (data["stopReason"] === "INTERRUPTED") {
+                rtpSession.clearQueue();
+                console.log('[Barge-in] Cleared RTP outbound queue');
+            }
 
             if (lastContentType === 'TEXT') {
                 if (lastGenerationStage === 'FINAL') {

@@ -11,8 +11,10 @@ export interface SipMessage {
   // Response fields (only for responses)
   statusCode?: number;
   reasonPhrase?: string;
-  // Common
+  // Common - single-value headers (lowercase key)
   headers: Record<string, string>;
+  // Raw header lines preserved in order (for Via, Record-Route, etc.)
+  rawHeaders: string[];
   body: string;
 }
 
@@ -44,10 +46,14 @@ export function parseSipMessage(raw: string): SipMessage {
 
   // Parse headers (handle multi-line headers with leading whitespace)
   const headers: Record<string, string> = {};
+  const rawHeaders: string[] = [];
   for (let i = 1; i < lines.length; i++) {
     const line = lines[i];
     if (line.startsWith(' ') || line.startsWith('\t')) {
       // Continuation of previous header
+      if (rawHeaders.length > 0) {
+        rawHeaders[rawHeaders.length - 1] += ' ' + line.trim();
+      }
       const lastKey = Object.keys(headers).pop();
       if (lastKey) headers[lastKey] += ' ' + line.trim();
       continue;
@@ -56,11 +62,13 @@ export function parseSipMessage(raw: string): SipMessage {
     if (colonIdx < 0) continue;
     const key = line.substring(0, colonIdx).trim();
     const value = line.substring(colonIdx + 1).trim();
-    // Store with lowercase key for easy lookup, preserve original value
+    // Preserve raw header line (keeps original casing and order)
+    rawHeaders.push(line);
+    // Store with lowercase key for easy lookup (last value wins for single-value headers)
     headers[key.toLowerCase()] = value;
   }
 
-  return { method, requestUri, statusCode, reasonPhrase, headers, body };
+  return { method, requestUri, statusCode, reasonPhrase, headers, rawHeaders, body };
 }
 
 /**
@@ -90,18 +98,31 @@ export function extractTag(headerValue: string): string {
 
 /**
  * Generate a SIP response message.
+ * Use rawHeaderLines for headers that must preserve order/multiplicity (Via, Record-Route).
+ * Use headers for single-value headers.
  */
 export function buildSipResponse(opts: {
   statusCode: number;
   reasonPhrase: string;
-  headers: Record<string, string>;
+  rawHeaderLines?: string[];
+  headers?: Record<string, string>;
   body?: string;
 }): string {
-  const { statusCode, reasonPhrase, headers, body } = opts;
+  const { statusCode, reasonPhrase, rawHeaderLines, headers, body } = opts;
   let msg = `SIP/2.0 ${statusCode} ${reasonPhrase}\r\n`;
 
-  for (const [key, value] of Object.entries(headers)) {
-    msg += `${key}: ${value}\r\n`;
+  // Write raw header lines first (preserves Via, Record-Route order)
+  if (rawHeaderLines) {
+    for (const line of rawHeaderLines) {
+      msg += `${line}\r\n`;
+    }
+  }
+
+  // Write additional single-value headers
+  if (headers) {
+    for (const [key, value] of Object.entries(headers)) {
+      msg += `${key}: ${value}\r\n`;
+    }
   }
 
   const bodyStr = body || '';
