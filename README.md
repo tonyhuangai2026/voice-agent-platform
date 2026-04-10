@@ -105,10 +105,9 @@
   - AI 自动标注
 
 #### 语音处理层
-- **ECS Fargate**：容器化 Node.js 服务
-- **WebSocket**：实时双向通信
+- **ECS EC2**：容器化 Node.js 服务（HOST 网络模式，支持 SIP/RTP）
+- **Amazon Chime SDK Voice Connector**：PSTN 电话网关（SIP/RTP）
 - **Amazon Nova Sonic**：语音 AI 模型
-- **Twilio**：语音通话网关
 
 #### 数据层
 - **DynamoDB 表结构**：
@@ -139,8 +138,9 @@
             └───────┬──────┘              │
                     │                     │
                     │              ┌──────▼───────┐
-                    │              │    Twilio    │
-                    │              │  (Outbound)  │
+                    │              │ Chime Voice  │
+                    │              │  Connector   │
+                    │              │ (SIP/RTP)    │
                     │              └──────────────┘
                     │                     │
             ┌───────▼──────┐              │
@@ -169,22 +169,22 @@
 - **实时通信**：Server-Sent Events (SSE)
 
 ### AWS 服务
-- **计算**：Lambda, ECS Fargate
+- **计算**：Lambda, ECS (EC2-backed)
 - **存储**：S3, DynamoDB
 - **网络**：CloudFront, ALB, API Gateway
 - **容器**：ECR
 - **AI**：Amazon Bedrock (Nova Sonic)
 - **认证**：自研 JWT 系统
 
-### 第三方服务
-- **语音通话**：Twilio Voice API
+### 电话网关
+- **语音通话**：Amazon Chime SDK Voice Connector（SIP/RTP）
 - **AI 标注**：Anthropic Claude Sonnet 4.6
 
 ## 📦 前置要求
 
 ### 必需
-- AWS 账号（具备管理员权限）
-- Twilio 账号（带可用电话号码）
+- AWS 账号（具备管理员权限，已开通 Amazon Chime SDK）
+- Amazon Chime SDK 电话号码（参见 [Chime 配置指南](docs/CHIME_SETUP.md)）
 - Node.js >= 20
 - Python >= 3.11
 - Docker（用于本地构建）
@@ -201,15 +201,14 @@ aws configure
 aws sts get-caller-identity
 ```
 
-### Twilio 配置
-1. 注册 Twilio 账号：https://www.twilio.com/
-2. 购买电话号码
-3. 创建 API Key
-4. 获取以下凭证：
-   - Account SID
-   - API Key SID
-   - API Key Secret
-   - 电话号码（E.164 格式，如 +1234567890）
+### Chime Voice Connector 配置
+详细步骤请参见 [Chime SDK Voice Connector 配置指南](docs/CHIME_SETUP.md)。
+
+简要步骤：
+1. 在 Amazon Chime SDK 控制台申请电话号码
+2. 创建 Voice Connector 并关闭加密要求
+3. 绑定号码到 Voice Connector
+4. 部署后配置 Origination 指向 Elastic IP
 
 ## 🚀 安装部署
 
@@ -228,11 +227,9 @@ cp .env.example .env
 
 编辑 `.env` 文件，填入实际值：
 ```bash
-# Twilio 凭证
-TWILIO_ACCOUNT_SID=ACxxxxxxxxxxxx
-TWILIO_API_SID=SKxxxxxxxxxxxx
-TWILIO_API_SECRET=your_secret_here
-TWILIO_FROM_NUMBER=+1234567890
+# Chime Voice Connector
+CHIME_VOICE_CONNECTOR_HOST=xxxxx.voiceconnector.chime.aws
+CHIME_PHONE_NUMBER=+1XXXXXXXXXX
 
 # AWS 区域
 AWS_REGION=us-east-1
@@ -306,19 +303,12 @@ aws cloudformation describe-stacks \
 
 关键输出：
 - **FrontendUrl**：前端访问地址（例如：`https://d2nwk8t6a2isa.cloudfront.net`）
-- **CloudFrontDomain**：语音服务器地址（配置到 Twilio webhook）
+- **GatewayPublicIP**：语音网关 Elastic IP（用于配置 Voice Connector）
 - **ApiGatewayUrl**：API Gateway 地址
 
-### 6. 配置 Twilio Webhook
+### 6. 配置 Voice Connector Origination
 
-1. 登录 Twilio Console
-2. 进入 Phone Numbers > Manage > Active Numbers
-3. 选择你的电话号码
-4. 在 "Voice & Fax" 部分：
-   - **A CALL COMES IN**: Webhook
-   - **URL**: `<CloudFrontDomain>/voice-income` （例如：`https://d18w266j8eiz37.cloudfront.net/voice-income`）
-   - **HTTP**: POST
-5. 保存配置
+使用 `GatewayPublicIP` 配置 Voice Connector 将来电转发到你的服务器。详见 [Chime 配置指南](docs/CHIME_SETUP.md) 步骤六。
 
 ## ⚙️ 配置说明
 
@@ -330,12 +320,13 @@ JWT_SECRET=<64位随机字符串>          # JWT 签名密钥
 INVITE_CODE=<邀请码>                 # 用户注册邀请码
 ```
 
-#### Twilio 配置
+#### Chime Voice Connector 配置
 ```bash
-TWILIO_ACCOUNT_SID=ACxxxxxxxxx       # Twilio 账号 SID
-TWILIO_API_SID=SKxxxxxxxxx           # Twilio API Key SID
-TWILIO_API_SECRET=xxxxxxxxxx         # Twilio API Secret
-TWILIO_FROM_NUMBER=+1234567890       # 外呼电话号码
+CHIME_VOICE_CONNECTOR_HOST=xxxxx.voiceconnector.chime.aws  # Voice Connector 主机名
+CHIME_PHONE_NUMBER=+1XXXXXXXXXX      # Chime 电话号码
+PUBLIC_IP=                            # Elastic IP（ECS 部署时自动设置）
+RTP_PORT_BASE=10000                   # RTP 起始端口
+RTP_PORT_COUNT=10000                  # RTP 端口数量
 ```
 
 #### AWS 配置
@@ -632,20 +623,24 @@ aws cloudfront create-invalidation \
    ```
 
 ### 通话无法接通
-**症状**：点击 Call 后无响应或立即挂断
+**症状**：拨打号码无响应或立即挂断
 
 **解决方案**：
-1. 检查 Twilio Webhook 配置
-2. 验证 ECS 服务状态：
+1. 确认 Voice Connector `RequireEncryption` 为 `false`
+2. 确认 Origination 指向正确的 Elastic IP 和端口 5060/UDP
+3. 确认安全组开放了 UDP 5060 和 UDP 10000-20000
+4. 确认 Elastic IP 已绑定到 EC2 实例
+5. 验证 ECS 服务状态：
    ```bash
    aws ecs describe-services \
      --cluster voice-agent-cluster \
-     --services voice-agent-service
+     --services voice-agent-sip-service
    ```
-3. 查看 ECS 日志：
+6. 查看 ECS 日志：
    ```bash
-   aws logs tail /ecs/voice-agent-service --follow
+   aws logs tail /ecs/voice-agent-server --follow --region us-east-1
    ```
+7. 详细排查步骤参见 [Chime 配置指南 - 常见问题](docs/CHIME_SETUP.md#常见问题)
 
 ### 实时转录无数据
 **症状**：Live Monitor 显示通话但无转录

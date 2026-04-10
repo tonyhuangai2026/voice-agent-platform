@@ -105,10 +105,9 @@ An enterprise-grade voice AI outbound calling platform built on AWS and Amazon N
   - AI auto-labeling
 
 #### Voice Processing Layer
-- **ECS Fargate**: Containerized Node.js service
-- **WebSocket**: Real-time bidirectional communication
+- **ECS EC2**: Containerized Node.js service (HOST networking for SIP/RTP)
+- **Amazon Chime SDK Voice Connector**: PSTN phone gateway (SIP/RTP)
 - **Amazon Nova Sonic**: Voice AI model
-- **Twilio**: Voice call gateway
 
 #### Data Layer
 - **DynamoDB Tables**:
@@ -139,8 +138,9 @@ An enterprise-grade voice AI outbound calling platform built on AWS and Amazon N
             └───────┬──────┘              │
                     │                     │
                     │              ┌──────▼───────┐
-                    │              │    Twilio    │
-                    │              │  (Outbound)  │
+                    │              │ Chime Voice  │
+                    │              │  Connector   │
+                    │              │ (SIP/RTP)    │
                     │              └──────────────┘
                     │                     │
             ┌───────▼──────┐              │
@@ -169,22 +169,22 @@ An enterprise-grade voice AI outbound calling platform built on AWS and Amazon N
 - **Real-time Communication**: Server-Sent Events (SSE)
 
 ### AWS Services
-- **Compute**: Lambda, ECS Fargate
+- **Compute**: Lambda, ECS (EC2-backed)
 - **Storage**: S3, DynamoDB
 - **Network**: CloudFront, ALB, API Gateway
 - **Container**: ECR
 - **AI**: Amazon Bedrock (Nova Sonic)
 - **Authentication**: Custom JWT system
 
-### Third-party Services
-- **Voice Calls**: Twilio Voice API
+### Phone Gateway
+- **Voice Calls**: Amazon Chime SDK Voice Connector (SIP/RTP)
 - **AI Labeling**: Anthropic Claude Sonnet 4.6
 
 ## 📦 Prerequisites
 
 ### Required
-- AWS Account (with admin permissions)
-- Twilio Account (with phone number)
+- AWS Account (with admin permissions and Amazon Chime SDK enabled)
+- Amazon Chime SDK phone number (see [Chime Setup Guide](docs/CHIME_SETUP.en.md))
 - Node.js >= 20
 - Python >= 3.11
 - Docker (for local build)
@@ -201,15 +201,14 @@ aws configure
 aws sts get-caller-identity
 ```
 
-### Twilio Configuration
-1. Register Twilio account: https://www.twilio.com/
-2. Purchase phone number
-3. Create API Key
-4. Get credentials:
-   - Account SID
-   - API Key SID
-   - API Key Secret
-   - Phone number (E.164 format, e.g., +1234567890)
+### Chime Voice Connector Configuration
+See [Chime SDK Voice Connector Setup Guide](docs/CHIME_SETUP.en.md) for detailed steps.
+
+Quick overview:
+1. Provision a phone number in Amazon Chime SDK console
+2. Create a Voice Connector and disable encryption requirement
+3. Associate the phone number with the Voice Connector
+4. After deployment, configure Origination to point to the Elastic IP
 
 ## 🚀 Installation
 
@@ -228,11 +227,9 @@ cp .env.example .env
 
 Edit `.env` file with actual values:
 ```bash
-# Twilio credentials
-TWILIO_ACCOUNT_SID=ACxxxxxxxxxxxx
-TWILIO_API_SID=SKxxxxxxxxxxxx
-TWILIO_API_SECRET=your_secret_here
-TWILIO_FROM_NUMBER=+1234567890
+# Chime Voice Connector
+CHIME_VOICE_CONNECTOR_HOST=xxxxx.voiceconnector.chime.aws
+CHIME_PHONE_NUMBER=+1XXXXXXXXXX
 
 # AWS region
 AWS_REGION=us-east-1
@@ -306,19 +303,12 @@ aws cloudformation describe-stacks \
 
 Key outputs:
 - **FrontendUrl**: Frontend access URL (e.g., `https://d2nwk8t6a2isa.cloudfront.net`)
-- **CloudFrontDomain**: Voice server URL (configure to Twilio webhook)
+- **GatewayPublicIP**: Voice gateway Elastic IP (for Voice Connector configuration)
 - **ApiGatewayUrl**: API Gateway URL
 
-### 6. Configure Twilio Webhook
+### 6. Configure Voice Connector Origination
 
-1. Login to Twilio Console
-2. Go to Phone Numbers > Manage > Active Numbers
-3. Select your phone number
-4. In "Voice & Fax" section:
-   - **A CALL COMES IN**: Webhook
-   - **URL**: `<CloudFrontDomain>/voice-income` (e.g., `https://d18w266j8eiz37.cloudfront.net/voice-income`)
-   - **HTTP**: POST
-5. Save configuration
+Use the `GatewayPublicIP` to configure the Voice Connector to route calls to your server. See [Chime Setup Guide](docs/CHIME_SETUP.en.md) Step 6 for details.
 
 ## ⚙️ Configuration
 
@@ -330,12 +320,13 @@ JWT_SECRET=<64-character random string>    # JWT signing key
 INVITE_CODE=<invite-code>                  # User registration invite code
 ```
 
-#### Twilio Configuration
+#### Chime Voice Connector Configuration
 ```bash
-TWILIO_ACCOUNT_SID=ACxxxxxxxxx       # Twilio Account SID
-TWILIO_API_SID=SKxxxxxxxxx           # Twilio API Key SID
-TWILIO_API_SECRET=xxxxxxxxxx         # Twilio API Secret
-TWILIO_FROM_NUMBER=+1234567890       # Outbound phone number
+CHIME_VOICE_CONNECTOR_HOST=xxxxx.voiceconnector.chime.aws  # Voice Connector hostname
+CHIME_PHONE_NUMBER=+1XXXXXXXXXX      # Chime phone number
+PUBLIC_IP=                            # Elastic IP (auto-set in ECS)
+RTP_PORT_BASE=10000                   # RTP start port
+RTP_PORT_COUNT=10000                  # RTP port range size
 ```
 
 #### AWS Configuration
@@ -635,17 +626,21 @@ aws cloudfront create-invalidation \
 **Symptom**: No response or immediate hangup after clicking Call
 
 **Solution**:
-1. Check Twilio Webhook configuration
-2. Verify ECS service status:
+1. Verify Voice Connector `RequireEncryption` is `false`
+2. Verify Origination points to the correct Elastic IP on port 5060/UDP
+3. Verify security groups allow inbound UDP 5060 and UDP 10000-20000
+4. Verify the Elastic IP is associated with the EC2 instance
+5. Verify ECS service status:
    ```bash
    aws ecs describe-services \
      --cluster voice-agent-cluster \
-     --services voice-agent-service
+     --services voice-agent-sip-service
    ```
-3. View ECS logs:
+6. View ECS logs:
    ```bash
-   aws logs tail /ecs/voice-agent-service --follow
+   aws logs tail /ecs/voice-agent-server --follow --region us-east-1
    ```
+7. See [Chime Setup Guide - Troubleshooting](docs/CHIME_SETUP.en.md#troubleshooting) for details
 
 ### No Real-time Transcript
 **Symptom**: Live Monitor shows call but no transcript
