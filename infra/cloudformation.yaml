@@ -641,7 +641,7 @@ Resources:
       ServiceName: voice-agent-sip-service
       Cluster: !Ref ECSCluster
       TaskDefinition: !Ref TaskDefinition
-      DesiredCount: 1
+      DesiredCount: 0
       LaunchType: EC2
       DeploymentConfiguration:
         MaximumPercent: 100
