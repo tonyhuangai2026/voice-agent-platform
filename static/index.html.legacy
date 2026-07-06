@@ -1,0 +1,695 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<title>GenAIIC Voice Bot Demo Web</title>
+<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/dompurify@3/dist/purify.min.js"></script>
+<style>
+  :root { color-scheme: dark; }
+  html, body { margin: 0; padding: 0; height: 100%; background: #0b0d10; color: #e6e6e6; font-family: system-ui, sans-serif; }
+  header { padding: 10px 16px; border-bottom: 1px solid #222; display: flex; flex-direction: column; gap: 8px; }
+  header .row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+  header h1 { font-size: 14px; font-weight: 600; margin: 0; color: #bbb; }
+  header .status { font-size: 12px; color: #888; }
+  header .dot { width: 8px; height: 8px; border-radius: 50%; background: #555; display: inline-block; margin-right: 6px; }
+  header .dot.on { background: #5c5; }
+  .modeswitch { display: inline-flex; border: 1px solid #333; border-radius: 4px; overflow: hidden; }
+  .modebtn { background: #1b1d22; color: #999; border: none; padding: 6px 12px; cursor: pointer; font: 13px system-ui; }
+  .modebtn.active { background: #2a3540; color: #fff; }
+  button, select { font: 13px system-ui; padding: 6px 14px; background: #1b1d22; color: #ddd; border: 1px solid #333; border-radius: 4px; cursor: pointer; }
+  button:hover:not(:disabled), select:hover:not(:disabled) { background: #252830; }
+  button:disabled, select:disabled { opacity: 0.4; cursor: not-allowed; }
+  select { padding: 5px 8px; }
+  label.ctl { font-size: 11px; color: #888; display: inline-flex; align-items: center; gap: 4px; }
+  main { display: grid; grid-template-columns: 1fr 1fr; gap: 1px; background: #222; flex: 1; min-height: 0; }
+  body { display: flex; flex-direction: column; }
+  section { background: #0b0d10; display: flex; flex-direction: column; min-height: 0; }
+  section h2 { margin: 0; padding: 8px 14px; font-size: 12px; text-transform: uppercase; letter-spacing: 0.1em; color: #888; border-bottom: 1px solid #1a1c20; }
+  .stream { flex: 1; overflow-y: auto; font: 12px/1.55 'SF Mono', Menlo, monospace; padding: 8px 14px; }
+  .evt { display: grid; grid-template-columns: 64px 90px 1fr; column-gap: 10px; padding: 2px 0; border-bottom: 1px dashed #1a1c20; }
+  .evt .ts { color: #666; }
+  .evt .tag { font-weight: 600; }
+  .evt .body { color: #ddd; word-break: break-word; }
+  .tag.user_speaking { color: #6cf; }
+  .tag.bot_speaking { color: #fa6; }
+  .tag.asr_partial { color: #8af; }
+  .tag.asr_final { color: #8cf; }
+  .tag.llm_start, .tag.llm_end { color: #aaa; }
+  .tag.llm_delta { color: #cfa; }
+  .tag.tts_start, .tag.tts_end { color: #fc8; }
+  .conv { flex: 1; overflow-y: auto; padding: 14px; }
+  .turn { margin: 0 0 12px; padding: 10px 12px; border-radius: 6px; background: #14171c; border: 1px solid #1a1c20; }
+  .turn.user { border-left: 3px solid #6cf; }
+  .turn.bot  { border-left: 3px solid #fa6; }
+  .turn .who { font-size: 11px; text-transform: uppercase; color: #888; margin-bottom: 4px; letter-spacing: 0.08em; }
+  .turn .txt { font-size: 14px; line-height: 1.45; white-space: pre-wrap; }
+  .turn.partial .txt { color: #8af; opacity: 0.7; }
+  .pill { display: inline-block; font-size: 10px; padding: 1px 6px; border-radius: 3px; margin-left: 6px; background: #2a2d33; color: #bbb; }
+  .mini { font-size: 11px; color: #888; margin-left: 8px; }
+  #modal { position: fixed; inset: 0; background: rgba(0,0,0,0.6); display: flex; align-items: center; justify-content: center; z-index: 10; }
+  #modal .inner { background: #14171c; border: 1px solid #2a2d33; border-radius: 6px; width: min(560px, 92vw); max-height: 80vh; display: flex; flex-direction: column; }
+  #modal .head { display: flex; align-items: center; justify-content: space-between; padding: 10px 14px; border-bottom: 1px solid #1a1c20; font-size: 13px; color: #bbb; }
+  #modal .head button { background: transparent; border: none; color: #888; font-size: 20px; cursor: pointer; padding: 0 6px; }
+  #modal #modalBody { padding: 14px 18px; overflow-y: auto; font-size: 14px; line-height: 1.6; color: #e6e6e6; }
+  #modalBody.plain { white-space: pre-wrap; }
+  #modalBody h1, #modalBody h2, #modalBody h3 { margin: 14px 0 6px; font-size: 15px; color: #fff; }
+  #modalBody h1 { font-size: 17px; }
+  #modalBody h2 { font-size: 15px; }
+  #modalBody p  { margin: 6px 0; }
+  #modalBody ul, #modalBody ol { padding-left: 22px; margin: 6px 0; }
+  #modalBody li { margin: 2px 0; }
+  #modalBody code { background: #1f2228; padding: 1px 5px; border-radius: 3px; font-size: 12.5px; }
+  #modalBody pre  { background: #1f2228; padding: 10px 12px; border-radius: 4px; overflow-x: auto; }
+  #modalBody pre code { background: transparent; padding: 0; }
+  #modalBody strong { color: #fff; }
+  #modalBody blockquote { border-left: 3px solid #2a2d33; margin: 8px 0; padding: 2px 12px; color: #bbb; }
+  #modalBody a { color: #8af; }
+  #promptModal { position: fixed; inset: 0; background: rgba(0,0,0,0.6); display: flex; align-items: center; justify-content: center; z-index: 10; }
+  #promptModal .inner { background: #14171c; border: 1px solid #2a2d33; border-radius: 6px; width: min(680px, 94vw); max-height: 88vh; display: flex; flex-direction: column; }
+  #promptModal .head { display: flex; align-items: center; justify-content: space-between; padding: 10px 14px; border-bottom: 1px solid #1a1c20; font-size: 13px; color: #bbb; }
+  #promptModal .head button { background: transparent; border: none; color: #888; font-size: 20px; cursor: pointer; padding: 0 6px; }
+  #promptBody { padding: 14px 18px; overflow-y: auto; }
+  .pf-row { display: flex; align-items: center; gap: 12px; margin-bottom: 10px; }
+  .pf-label { display: block; font-size: 12px; color: #bbb; margin: 12px 0 4px; }
+  .pf-sub { color: #777; font-weight: normal; margin-left: 4px; font-size: 11px; }
+  #promptBody textarea { width: 100%; background: #0b0d10; color: #e6e6e6; border: 1px solid #2a2d33; border-radius: 4px; padding: 8px 10px; font: 13px/1.5 'SF Mono', Menlo, monospace; box-sizing: border-box; resize: vertical; }
+  #promptBody textarea:focus { outline: none; border-color: #3a5; }
+  .pf-actions { display: flex; gap: 8px; margin-top: 14px; padding-top: 12px; border-top: 1px solid #1a1c20; }
+</style>
+</head>
+<body>
+<header>
+  <div class="row">
+    <h1>GenAIIC Voice Bot Demo</h1>
+    <span class="modeswitch">
+      <button id="modeTalk" class="modebtn active">Talk</button>
+      <button id="modeMonitor" class="modebtn">Monitor</button>
+    </span>
+    <label class="ctl" id="callCtl" style="display:none;">call <select id="callSel"></select></label>
+    <label class="ctl">engine <select id="engineSel"></select></label>
+    <label class="ctl">scenario <select id="scenarioSel"></select></label>
+    <label class="ctl">lang <select id="langSel"></select></label>
+    <label class="ctl" id="modelCtl">model <select id="modelSel"></select></label>
+    <label class="ctl" id="providerCtl">tts <select id="providerSel"></select></label>
+    <label class="ctl" id="mmModelCtl">mm-model <select id="mmModelSel"></select></label>
+    <label class="ctl">voice <select id="voiceSel"></select></label>
+    <label class="ctl">summary <select id="sumLangSel"></select></label>
+  </div>
+  <div class="row">
+    <button id="start">Start</button>
+    <button id="stop" disabled>Stop</button>
+    <button id="summarize">Summarize</button>
+    <button id="editPrompts">Prompts</button>
+    <span class="status"><span class="dot" id="wsDot"></span><span id="wsLabel">disconnected</span></span>
+    <span class="status"><span class="dot" id="userDot"></span>user</span>
+    <span class="status"><span class="dot" id="botDot"></span>bot</span>
+    <span class="mini" id="latency"></span>
+  </div>
+</header>
+
+<div id="promptModal" style="display:none;"><div class="inner">
+  <div class="head"><span>Prompts (per language)</span><button id="promptClose">×</button></div>
+  <div id="promptBody">
+    <div class="pf-row">
+      <label class="ctl">language <select id="pfLangSel"></select></label>
+      <span class="mini" id="pfDirty"></span>
+    </div>
+    <label class="pf-label">System instruction <span class="pf-sub">(used as the LLM's system prompt for this language)</span></label>
+    <textarea id="pfSystem" rows="5"></textarea>
+    <label class="pf-label">Greeting trigger <span class="pf-sub">(sent as a developer message at session start to make the bot say hello)</span></label>
+    <textarea id="pfGreeting" rows="3"></textarea>
+    <label class="pf-label">Summary prompt <span class="pf-sub">(system instruction used by the Summarize button, per target language)</span></label>
+    <textarea id="pfSummary" rows="5"></textarea>
+    <div class="pf-actions">
+      <button id="pfSave">Save</button>
+      <button id="pfReset">Reset to default</button>
+      <button id="pfResetAll">Reset ALL languages</button>
+    </div>
+  </div>
+</div></div>
+
+<div id="modal" style="display:none;"><div class="inner">
+  <div class="head"><span id="modalTitle">Summary</span><button id="modalClose">×</button></div>
+  <div id="modalBody"></div>
+</div></div>
+
+<main>
+  <section>
+    <h2>Event stream</h2>
+    <div class="stream" id="stream"></div>
+  </section>
+  <section>
+    <h2>Transcript</h2>
+    <div class="conv" id="conv"></div>
+  </section>
+</main>
+
+<script>
+const IN_RATE = 16000;
+const OUT_RATE = 24000;
+let ws, micStream, audioCtx, workletNode, playerCtx, playhead = 0;
+
+const $ = (id) => document.getElementById(id);
+const streamEl = $("stream"), convEl = $("conv"), latencyEl = $("latency");
+const wsDot = $("wsDot"), wsLabel = $("wsLabel"), userDot = $("userDot"), botDot = $("botDot");
+const langSel = $("langSel"), modelSel = $("modelSel"), voiceSel = $("voiceSel"), sumLangSel = $("sumLangSel");
+const providerSel = $("providerSel"), engineSel = $("engineSel"), scenarioSel = $("scenarioSel"), mmModelSel = $("mmModelSel");
+const summarizeBtn = $("summarize"), modal = $("modal"), modalBody = $("modalBody"), modalTitle = $("modalTitle"), modalClose = $("modalClose");
+
+// All finalized turns (user + bot) collected in order for /api/summary.
+const turnHistory = [];
+let serverConfig = null;
+
+// -- Prompt overrides, persisted in localStorage --------------------------
+// Shape: { "zh-HK": { system: "...", greeting: "...", summary: "..." }, ... }
+const LS_KEY = "voicebot_prompts_v1";
+function loadPrompts() {
+  try { return JSON.parse(localStorage.getItem(LS_KEY) || "{}"); }
+  catch { return {}; }
+}
+function savePrompts(p) { localStorage.setItem(LS_KEY, JSON.stringify(p)); }
+let prompts = loadPrompts();
+
+// For a given language key, return the effective prompt (override if set,
+// else the server's default). `field` is "system" | "greeting" | "summary".
+function effectivePrompt(langKey, field) {
+  const override = (prompts[langKey] || {})[field];
+  if (override && override.trim()) return override;
+  const def = (serverConfig?.default_prompts || {})[langKey] || {};
+  return def[field] || "";
+}
+
+function fillSelect(sel, items, defId) {
+  sel.innerHTML = "";
+  items.forEach(it => {
+    const o = document.createElement("option");
+    o.value = it.id; o.textContent = it.label;
+    if (it.id === defId) o.selected = true;
+    sel.appendChild(o);
+  });
+}
+
+function refreshVoices() {
+  if (!serverConfig) return;
+  if (engineSel.value === "nova-sonic") {
+    fillSelect(voiceSel, serverConfig.nova_sonic_voices, serverConfig.default_nova_sonic_voice);
+    return;
+  }
+  const provider = providerSel.value;
+  const all = serverConfig.voices_by_provider[provider] || [];
+  // Filter to current language; if none match, fall back to the full list so
+  // the dropdown is never empty.
+  const lang = langSel.value;
+  let filtered = all.filter(v => v.language === lang);
+  if (filtered.length === 0) filtered = all;
+  // Default voice: provider's hardcoded default if it's in the filtered set,
+  // otherwise the first entry.
+  const providerDef = serverConfig.default_voices[provider];
+  const def = filtered.some(v => v.id === providerDef) ? providerDef : (filtered[0] && filtered[0].id);
+  fillSelect(voiceSel, filtered, def);
+}
+
+function refreshEngineUI() {
+  const isNovaSonic = engineSel.value === "nova-sonic";
+  // model & TTS provider are irrelevant for Nova Sonic (it's end-to-end).
+  $("modelCtl").style.display = isNovaSonic ? "none" : "";
+  $("providerCtl").style.display = isNovaSonic ? "none" : "";
+  refreshMmModelUI();
+  refreshVoices();
+}
+
+function refreshMmModelUI() {
+  const ctl = $("mmModelCtl");
+  if (!ctl) return;
+  const show = engineSel.value !== "nova-sonic" && providerSel.value === "minimax";
+  ctl.style.display = show ? "" : "none";
+}
+
+async function loadConfig() {
+  const r = await fetch("/api/config");
+  serverConfig = await r.json();
+  fillSelect(engineSel, serverConfig.engines || [{id:"pipeline",label:"Pipeline"}], serverConfig.default_engine || "pipeline");
+  fillSelect(scenarioSel, serverConfig.scenarios || [{id:"default",label:"Default"}], serverConfig.default_scenario || "default");
+  fillSelect(langSel, serverConfig.languages, serverConfig.default_language);
+  fillSelect(modelSel, serverConfig.models, serverConfig.default_model);
+  fillSelect(providerSel, serverConfig.providers, serverConfig.default_provider);
+  fillSelect(mmModelSel, serverConfig.minimax_models || [], serverConfig.default_minimax_model);
+  fillSelect(sumLangSel, serverConfig.languages, serverConfig.default_language);
+  refreshEngineUI();
+  engineSel.onchange = refreshEngineUI;
+  providerSel.onchange = () => { refreshMmModelUI(); refreshVoices(); };
+  langSel.onchange = refreshVoices;
+}
+loadConfig();
+
+let partialUserTurn = null;   // DOM node for an in-progress ASR partial
+let currentBotTurn  = null;   // DOM node for an in-progress LLM response
+let tUserStop = null;         // t when user stopped speaking (for latency calc)
+let tFirstBotAudio = null;
+
+function pushEvent(type, body, ts) {
+  const row = document.createElement("div");
+  row.className = "evt";
+  row.innerHTML = `<span class="ts">${ts.toFixed(2)}s</span><span class="tag ${type}">${type}</span><span class="body"></span>`;
+  row.querySelector(".body").textContent = body;
+  streamEl.appendChild(row);
+  streamEl.scrollTop = streamEl.scrollHeight;
+}
+
+function userTurn(text, partial) {
+  if (partial) {
+    if (!partialUserTurn) {
+      partialUserTurn = document.createElement("div");
+      partialUserTurn.className = "turn user partial";
+      partialUserTurn.innerHTML = `<div class="who">user <span class="pill">partial</span></div><div class="txt"></div>`;
+      convEl.appendChild(partialUserTurn);
+    }
+    partialUserTurn.querySelector(".txt").textContent = text;
+  } else {
+    const node = partialUserTurn || document.createElement("div");
+    node.className = "turn user";
+    node.innerHTML = `<div class="who">user</div><div class="txt"></div>`;
+    node.querySelector(".txt").textContent = text;
+    if (!partialUserTurn) convEl.appendChild(node);
+    partialUserTurn = null;
+    turnHistory.push({ who: "user", text });
+  }
+  convEl.scrollTop = convEl.scrollHeight;
+}
+
+// Bot bubble is created lazily on first delta so an empty llm_start/llm_end
+// pair (e.g. aborted turn) never leaves a blank bubble behind.
+function ensureBotTurn() {
+  if (!currentBotTurn) {
+    currentBotTurn = document.createElement("div");
+    currentBotTurn.className = "turn bot";
+    currentBotTurn.innerHTML = `<div class="who">bot</div><div class="txt"></div>`;
+    convEl.appendChild(currentBotTurn);
+  }
+  return currentBotTurn;
+}
+function botTurnDelta(text) {
+  if (!text) return;
+  ensureBotTurn().querySelector(".txt").textContent += text;
+  convEl.scrollTop = convEl.scrollHeight;
+}
+function botTurnEnd(fullText) {
+  if (fullText && currentBotTurn) {
+    currentBotTurn.querySelector(".txt").textContent = fullText;
+  }
+  if (currentBotTurn) {
+    const finalText = currentBotTurn.querySelector(".txt").textContent || "";
+    if (finalText.trim()) turnHistory.push({ who: "bot", text: finalText });
+  }
+  currentBotTurn = null;
+}
+
+function handleEvent(msg) {
+  pushEvent(msg.type, msg.text ?? (msg.value === true ? "▶" : msg.value === false ? "■" : ""), msg.t);
+  switch (msg.type) {
+    case "user_speaking":
+      userDot.classList.toggle("on", msg.value);
+      if (msg.value === false) tUserStop = performance.now();
+      break;
+    case "bot_speaking":
+      botDot.classList.toggle("on", msg.value);
+      break;
+    case "asr_partial": userTurn(msg.text, true); break;
+    case "asr_final":   userTurn(msg.text, false); break;
+    case "llm_start":   break; /* bubble created on first delta */
+    case "llm_delta":   botTurnDelta(msg.text); break;
+    case "llm_end":     botTurnEnd(msg.text); break;
+    case "tts_start":   tFirstBotAudio = null; break;
+    case "tts_end":     break;
+  }
+}
+
+// AudioWorklet that downsamples to IN_RATE and posts Int16 PCM frames.
+const workletCode = `
+class PCMWorklet extends AudioWorkletProcessor {
+  constructor(opts) {
+    super();
+    this.targetRate = opts.processorOptions.targetRate;
+    this.ratio = sampleRate / this.targetRate;
+    this.acc = 0;
+    this.buf = [];
+  }
+  process(inputs) {
+    const ch = inputs[0][0];
+    if (!ch) return true;
+    for (let i = 0; i < ch.length; i++) {
+      this.acc += 1;
+      if (this.acc >= this.ratio) {
+        this.acc -= this.ratio;
+        const s = Math.max(-1, Math.min(1, ch[i]));
+        this.buf.push(s < 0 ? s * 0x8000 : s * 0x7fff);
+      }
+    }
+    if (this.buf.length >= 320) {
+      const out = new Int16Array(this.buf);
+      this.buf = [];
+      this.port.postMessage(out.buffer, [out.buffer]);
+    }
+    return true;
+  }
+}
+registerProcessor("pcm-worklet", PCMWorklet);
+`;
+
+async function start() {
+  $("start").disabled = true;
+  micStream = await navigator.mediaDevices.getUserMedia({ audio: {
+    channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true,
+  }});
+
+  audioCtx = new AudioContext();
+  const blob = new Blob([workletCode], { type: "application/javascript" });
+  await audioCtx.audioWorklet.addModule(URL.createObjectURL(blob));
+  const src = audioCtx.createMediaStreamSource(micStream);
+  workletNode = new AudioWorkletNode(audioCtx, "pcm-worklet", {
+    processorOptions: { targetRate: IN_RATE }
+  });
+  src.connect(workletNode);
+  const sink = audioCtx.createGain();
+  sink.gain.value = 0;
+  workletNode.connect(sink).connect(audioCtx.destination);
+
+  // Don't pin sampleRate on the output AudioContext — some desktop browsers
+  // reject non-native rates. Use the browser's default; AudioBufferSourceNode
+  // resamples per-buffer from OUT_RATE to the context rate automatically.
+  playerCtx = new AudioContext();
+  playhead = playerCtx.currentTime;
+
+  const proto = location.protocol === "https:" ? "wss:" : "ws:";
+  const qs = new URLSearchParams({
+    engine: engineSel.value,
+    scenario: scenarioSel.value,
+    lang: langSel.value,
+    voice: voiceSel.value,
+  });
+  if (engineSel.value !== "nova-sonic") {
+    qs.set("model", modelSel.value);
+    qs.set("provider", providerSel.value);
+    if (providerSel.value === "minimax" && mmModelSel.value) {
+      qs.set("minimax_model", mmModelSel.value);
+    }
+  }
+  const sysOverride = (prompts[langSel.value] || {}).system;
+  const greetOverride = (prompts[langSel.value] || {}).greeting;
+  if (sysOverride && sysOverride.trim())   qs.set("system", sysOverride);
+  if (greetOverride && greetOverride.trim()) qs.set("greeting", greetOverride);
+  ws = new WebSocket(`${proto}//${location.host}/ws?${qs}`);
+  ws.binaryType = "arraybuffer";
+
+  ws.onopen = () => {
+    wsDot.classList.add("on"); wsLabel.textContent = "connected";
+    const cfgMsg = engineSel.value === "nova-sonic"
+      ? `engine=nova-sonic scenario=${scenarioSel.value} lang=${langSel.value} voice=${voiceSel.value}`
+      : `engine=pipeline scenario=${scenarioSel.value} lang=${langSel.value} model=${modelSel.value} tts=${providerSel.value} voice=${voiceSel.value}`;
+    pushEvent("config", cfgMsg, 0);
+    workletNode.port.onmessage = (e) => { if (ws.readyState === 1) ws.send(e.data); };
+    engineSel.disabled = true; scenarioSel.disabled = true;
+    langSel.disabled = true; modelSel.disabled = true; providerSel.disabled = true; voiceSel.disabled = true;
+    mmModelSel.disabled = true;
+    $("stop").disabled = false;
+  };
+  ws.onmessage = (e) => {
+    if (typeof e.data === "string") {
+      try { handleEvent(JSON.parse(e.data)); }
+      catch { pushEvent("msg", e.data, 0); }
+      return;
+    }
+    if (tFirstBotAudio === null && tUserStop !== null) {
+      tFirstBotAudio = performance.now();
+      const ms = Math.round(tFirstBotAudio - tUserStop);
+      latencyEl.textContent = `first-audio latency: ${ms} ms`;
+    }
+    playPCM(new Int16Array(e.data));
+  };
+  ws.onclose = () => { wsDot.classList.remove("on"); wsLabel.textContent = "disconnected"; cleanup(); };
+  ws.onerror = (ev) => { pushEvent("error", String(ev.type || ev), 0); };
+}
+
+function playPCM(int16) {
+  const f32 = new Float32Array(int16.length);
+  for (let i = 0; i < int16.length; i++) f32[i] = int16[i] / 0x8000;
+  const buf = playerCtx.createBuffer(1, f32.length, OUT_RATE);
+  buf.copyToChannel(f32, 0);
+  const node = playerCtx.createBufferSource();
+  node.buffer = buf;
+  node.connect(playerCtx.destination);
+  const now = playerCtx.currentTime;
+  if (playhead < now) playhead = now;
+  node.start(playhead);
+  playhead += buf.duration;
+}
+
+function stop() { if (ws && ws.readyState <= 1) ws.close(); cleanup(); }
+function cleanup() {
+  $("stop").disabled = true; $("start").disabled = false;
+  engineSel.disabled = false; scenarioSel.disabled = false;
+  langSel.disabled = false; modelSel.disabled = false; providerSel.disabled = false; voiceSel.disabled = false;
+  mmModelSel.disabled = false;
+  if (workletNode) { workletNode.disconnect(); workletNode = null; }
+  if (micStream) { micStream.getTracks().forEach(t => t.stop()); micStream = null; }
+  if (audioCtx) { audioCtx.close(); audioCtx = null; }
+  if (playerCtx) { playerCtx.close(); playerCtx = null; }
+}
+
+$("start").onclick = start;
+$("stop").onclick = stop;
+
+async function summarize() {
+  if (turnHistory.length === 0) {
+    showModal("Summary", "(no conversation yet)");
+    return;
+  }
+  summarizeBtn.disabled = true;
+  const lang = sumLangSel.value;
+  showModal(`Summary (${lang})`, "Summarizing...");
+  try {
+    const sumOverride = (prompts[lang] || {}).summary;
+    const r = await fetch("/api/summary", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        language: lang,
+        model: modelSel.value,
+        turns: turnHistory,
+        system_prompt: (sumOverride && sumOverride.trim()) ? sumOverride : undefined,
+      }),
+    });
+    const data = await r.json();
+    if (data.error) {
+      renderModal("Summary", "Error: " + data.error, false);
+    } else {
+      renderModal(
+        `Summary (${data.language}, ${data.turns} turns, ${data.model})`,
+        data.summary || "(empty)",
+        true,
+      );
+    }
+    pushEvent("summary", `lang=${lang} turns=${turnHistory.length}`, 0);
+  } catch (e) {
+    renderModal("Summary", "Error: " + e, false);
+  } finally {
+    summarizeBtn.disabled = false;
+  }
+}
+
+function renderModal(title, body, markdown) {
+  modalTitle.textContent = title;
+  if (markdown && window.marked && window.DOMPurify) {
+    modalBody.classList.remove("plain");
+    modalBody.innerHTML = DOMPurify.sanitize(marked.parse(body));
+  } else {
+    modalBody.classList.add("plain");
+    modalBody.textContent = body;
+  }
+  modal.style.display = "flex";
+}
+
+function showModal(title, body) {
+  renderModal(title, body, false);
+}
+function hideModal() { modal.style.display = "none"; }
+
+summarizeBtn.onclick = summarize;
+modalClose.onclick = hideModal;
+modal.onclick = (e) => { if (e.target === modal) hideModal(); };
+hideModal();
+
+// -- Talk / Monitor mode --------------------------------------------------
+const modeTalkBtn = $("modeTalk"), modeMonitorBtn = $("modeMonitor"), callSel = $("callSel"), callCtl = $("callCtl");
+let monitorWs = null;
+let callsTimer = null;
+let currentMode = "talk";
+
+function setMode(mode) {
+  currentMode = mode;
+  modeTalkBtn.classList.toggle("active", mode === "talk");
+  modeMonitorBtn.classList.toggle("active", mode === "monitor");
+
+  const monitorVisible = (mode === "monitor");
+  callCtl.style.display = monitorVisible ? "" : "none";
+  // Hide controls that only make sense for talk mode
+  ["engineSel","scenarioSel","langSel","modelSel","providerSel","mmModelSel","voiceSel","sumLangSel"].forEach(id => {
+    const el = $(id); if (!el) return;
+    el.parentElement.style.display = monitorVisible ? "none" : "";
+  });
+  ["start","stop","editPrompts"].forEach(id => $(id).style.display = monitorVisible ? "none" : "");
+
+  if (mode === "monitor") {
+    refreshCalls();
+    if (callsTimer) clearInterval(callsTimer);
+    callsTimer = setInterval(refreshCalls, 2000);
+  } else {
+    if (callsTimer) { clearInterval(callsTimer); callsTimer = null; }
+    closeMonitor();
+  }
+}
+
+async function refreshCalls() {
+  try {
+    const r = await fetch("/api/calls");
+    const d = await r.json();
+    const prev = callSel.value;
+    callSel.innerHTML = "";
+    if (!d.calls || d.calls.length === 0) {
+      const o = document.createElement("option");
+      o.value = ""; o.textContent = "(no active calls)";
+      callSel.appendChild(o);
+      closeMonitor();
+      return;
+    }
+    d.calls.forEach(c => {
+      const o = document.createElement("option");
+      o.value = c.call_id;
+      const t = new Date(c.started * 1000).toLocaleTimeString();
+      o.textContent = `${c.call_id}  ${c.caller || ""}  · started ${t}  · ${c.monitors} watching`;
+      callSel.appendChild(o);
+    });
+    // Restore previous selection if still present, else open first call.
+    if (prev && d.calls.some(c => c.call_id === prev)) {
+      callSel.value = prev;
+    } else {
+      callSel.value = d.calls[0].call_id;
+      openMonitor(callSel.value);
+    }
+  } catch (e) {
+    pushEvent("error", "calls fetch failed: " + e, 0);
+  }
+}
+
+callSel.onchange = () => { if (callSel.value) openMonitor(callSel.value); };
+
+function openMonitor(callId) {
+  closeMonitor();
+  // Reset transcript columns when switching calls.
+  streamEl.innerHTML = ""; convEl.innerHTML = "";
+  turnHistory.length = 0;
+  partialUserTurn = null; currentBotTurn = null;
+  const proto = location.protocol === "https:" ? "wss:" : "ws:";
+  const qs = new URLSearchParams({ call_id: callId });
+  monitorWs = new WebSocket(`${proto}//${location.host}/monitor/ws?${qs}`);
+  monitorWs.onopen = () => {
+    wsDot.classList.add("on"); wsLabel.textContent = `monitoring ${callId}`;
+  };
+  monitorWs.onmessage = (e) => {
+    if (typeof e.data !== "string") return;  // ignore any binary
+    try { handleEvent(JSON.parse(e.data)); }
+    catch { pushEvent("msg", e.data, 0); }
+  };
+  monitorWs.onclose = () => {
+    wsDot.classList.remove("on"); wsLabel.textContent = "disconnected";
+    monitorWs = null;
+  };
+}
+
+function closeMonitor() {
+  if (monitorWs && monitorWs.readyState <= 1) monitorWs.close();
+  monitorWs = null;
+}
+
+modeTalkBtn.onclick = () => setMode("talk");
+modeMonitorBtn.onclick = () => setMode("monitor");
+
+// -- Prompt editor --------------------------------------------------------
+const promptModal = $("promptModal"), promptClose = $("promptClose");
+const pfLangSel = $("pfLangSel"), pfSystem = $("pfSystem"), pfGreeting = $("pfGreeting"), pfSummary = $("pfSummary");
+const pfSave = $("pfSave"), pfReset = $("pfReset"), pfResetAll = $("pfResetAll"), pfDirty = $("pfDirty");
+
+function openPromptEditor() {
+  if (!serverConfig) return;
+  pfLangSel.innerHTML = "";
+  serverConfig.languages.forEach(l => {
+    const o = document.createElement("option");
+    o.value = l.id; o.textContent = l.label;
+    if (l.id === langSel.value) o.selected = true;
+    pfLangSel.appendChild(o);
+  });
+  loadFieldsForLang(pfLangSel.value);
+  promptModal.style.display = "flex";
+}
+function closePromptEditor() { promptModal.style.display = "none"; }
+
+function loadFieldsForLang(langKey) {
+  const def = (serverConfig.default_prompts || {})[langKey] || {};
+  const ov  = prompts[langKey] || {};
+  pfSystem.value   = ov.system   ?? def.system   ?? "";
+  pfGreeting.value = ov.greeting ?? def.greeting ?? "";
+  pfSummary.value  = ov.summary  ?? def.summary  ?? "";
+  updateDirty(langKey);
+}
+
+function updateDirty(langKey) {
+  const def = (serverConfig.default_prompts || {})[langKey] || {};
+  const modified = [
+    pfSystem.value   !== (def.system   ?? ""),
+    pfGreeting.value !== (def.greeting ?? ""),
+    pfSummary.value  !== (def.summary  ?? ""),
+  ].filter(Boolean).length;
+  pfDirty.textContent = modified > 0 ? `${modified} field(s) customized` : "using defaults";
+}
+
+pfLangSel.onchange = () => loadFieldsForLang(pfLangSel.value);
+[pfSystem, pfGreeting, pfSummary].forEach(el =>
+  el.addEventListener("input", () => updateDirty(pfLangSel.value))
+);
+
+pfSave.onclick = () => {
+  const langKey = pfLangSel.value;
+  const def = (serverConfig.default_prompts || {})[langKey] || {};
+  const entry = {};
+  // Only store a field if it differs from the default (keep localStorage small).
+  if (pfSystem.value   !== (def.system   ?? "")) entry.system   = pfSystem.value;
+  if (pfGreeting.value !== (def.greeting ?? "")) entry.greeting = pfGreeting.value;
+  if (pfSummary.value  !== (def.summary  ?? "")) entry.summary  = pfSummary.value;
+  if (Object.keys(entry).length) prompts[langKey] = entry;
+  else delete prompts[langKey];
+  savePrompts(prompts);
+  updateDirty(langKey);
+  pushEvent("prompts_saved", `lang=${langKey} fields=${Object.keys(entry).length}`, 0);
+};
+
+pfReset.onclick = () => {
+  const langKey = pfLangSel.value;
+  delete prompts[langKey];
+  savePrompts(prompts);
+  loadFieldsForLang(langKey);
+};
+
+pfResetAll.onclick = () => {
+  if (!confirm("Reset all customized prompts to defaults?")) return;
+  prompts = {};
+  savePrompts(prompts);
+  loadFieldsForLang(pfLangSel.value);
+};
+
+$("editPrompts").onclick = openPromptEditor;
+promptClose.onclick = closePromptEditor;
+promptModal.onclick = (e) => { if (e.target === promptModal) closePromptEditor(); };
+</script>
+</body>
+</html>

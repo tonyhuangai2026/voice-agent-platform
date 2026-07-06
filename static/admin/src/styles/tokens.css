@@ -1,0 +1,116 @@
+/*
+ * Voice Bot design tokens — CSS custom properties.
+ *
+ * (Formerly kept byte-identical with the demo SPA's copy; the demo SPA was
+ * removed in the single-page merge — this is now the sole copy.)
+ *
+ * Self-drawn components (BrandLogo / StatChip / MetricCard / EmptyState,
+ * charts, waveform) reference ONLY these --vb-* vars (no hardcoded colors) so
+ * they follow dark mode. naive-ui components are themed separately via
+ * themeOverrides in theme.js.
+ *
+ * Dark mode contract: App.vue toggles `document.documentElement.classList`
+ * with the `dark` class in lock-step with the naive darkTheme prop, so the
+ * `html.dark` overrides below activate together with naive's dark theme.
+ */
+
+:root {
+  /* Brand / primary */
+  --vb-primary: #0972D3;
+  --vb-primary-hover: #0B5FAE;
+  --vb-primary-pressed: #033160;
+
+  /* Accent (AWS orange) */
+  --vb-accent: #FF9900;
+
+  /* Ink + neutral grey scale */
+  --vb-ink: #232F3E;
+  --vb-grey-900: #16191F;
+  --vb-grey-700: #414D5C;
+  --vb-grey-500: #687078;
+  --vb-grey-300: #D5DBDB;
+  --vb-grey-200: #EAEDED;
+  --vb-grey-100: #FAFAFA;
+
+  /* Semantic */
+  --vb-success: #037F0C;
+  --vb-warning: #FF9900;
+  --vb-error: #D91515;
+  --vb-info: #0972D3;
+
+  /* Surfaces (light) */
+  --vb-bg: #FAFAFA;
+  --vb-surface: #FFFFFF;
+  --vb-surface-alt: #EAEDED;
+  --vb-border: #D5DBDB;
+  --vb-border-strong: #687078;
+
+  /* Text (light) */
+  --vb-text: #232F3E;
+  --vb-text-secondary: #414D5C;
+  --vb-text-tertiary: #687078;
+  --vb-text-inverse: #FFFFFF;
+
+  /* On-primary text (for filled brand surfaces) */
+  --vb-on-primary: #FFFFFF;
+
+  /* Radius ladder */
+  --vb-radius-sm: 4px;
+  --vb-radius-md: 8px;
+  --vb-radius-lg: 12px;
+
+  /* Spacing — 4px grid */
+  --vb-space-xs: 4px;
+  --vb-space-sm: 8px;
+  --vb-space-md: 12px;
+  --vb-space-lg: 16px;
+  --vb-space-xl: 24px;
+  --vb-space-xxl: 32px;
+
+  /* Shadow ladder (3-tier, low-saturation) */
+  --vb-shadow-card: 0 1px 2px rgba(35, 47, 62, 0.08), 0 1px 1px rgba(35, 47, 62, 0.04);
+  --vb-shadow-popover: 0 4px 12px rgba(35, 47, 62, 0.12), 0 2px 4px rgba(35, 47, 62, 0.06);
+  --vb-shadow-modal: 0 12px 32px rgba(35, 47, 62, 0.18), 0 4px 8px rgba(35, 47, 62, 0.08);
+
+  /* Typography */
+  --vb-font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'PingFang SC', 'Microsoft YaHei', system-ui, sans-serif;
+  --vb-font-mono: 'SFMono-Regular', ui-monospace, 'Cascadia Code', Menlo, Consolas, monospace;
+}
+
+html.dark {
+  /* Brand stays vivid; lift hover for contrast on dark surfaces */
+  --vb-primary: #539FE5;
+  --vb-primary-hover: #6BB0EC;
+  --vb-primary-pressed: #89BDEE;
+
+  --vb-accent: #FFAA33;
+
+  /* Inverted ink / surfaces */
+  --vb-ink: #FAFAFA;
+
+  /* Semantic — brightened for dark backgrounds */
+  --vb-success: #29AD32;
+  --vb-warning: #FFAA33;
+  --vb-error: #EB6F6F;
+  --vb-info: #539FE5;
+
+  /* Surfaces (dark) */
+  --vb-bg: #161D26;
+  --vb-surface: #1F2A37;
+  --vb-surface-alt: #2A3744;
+  --vb-border: #414D5C;
+  --vb-border-strong: #687078;
+
+  /* Text (dark) */
+  --vb-text: #FAFAFA;
+  --vb-text-secondary: #D5DBDB;
+  --vb-text-tertiary: #9BA7B0;
+  --vb-text-inverse: #16191F;
+
+  --vb-on-primary: #16191F;
+
+  /* Shadows — deeper on dark */
+  --vb-shadow-card: 0 1px 2px rgba(0, 0, 0, 0.40), 0 1px 1px rgba(0, 0, 0, 0.24);
+  --vb-shadow-popover: 0 4px 12px rgba(0, 0, 0, 0.48), 0 2px 4px rgba(0, 0, 0, 0.32);
+  --vb-shadow-modal: 0 12px 32px rgba(0, 0, 0, 0.56), 0 4px 8px rgba(0, 0, 0, 0.40);
+}

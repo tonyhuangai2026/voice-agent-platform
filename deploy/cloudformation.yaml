@@ -1,0 +1,877 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: GenAIIC Voice Bot Demo - EC2 + CloudFront (HTTPS via *.cloudfront.net)
+
+Parameters:
+  CodeBucket:
+    Type: String
+    Description: S3 bucket where the code tarball lives (created by deploy.sh).
+  CodeKey:
+    Type: String
+    Description: S3 key for the code tarball (created by deploy.sh).
+  MinimaxApiKey:
+    Type: String
+    NoEcho: true
+    Default: ''
+    Description: Optional MiniMax API key. Leave blank to use only AWS Polly TTS.
+  SitePassword:
+    Type: String
+    NoEcho: true
+    Default: ''
+    Description: Optional Basic Auth password gating the whole site. Leave blank to disable auth.
+  AdminPassword:
+    Type: String
+    NoEcho: true
+    Default: ''
+    Description: Optional Basic Auth password for /admin/ and /api/admin/* (runtime config UI). Empty = admin disabled (returns 503).
+  InstanceType:
+    Type: String
+    Default: t3.medium
+    AllowedValues: [t3.small, t3.medium, t3.large, m5.large]
+    Description: EC2 instance type. t3.medium recommended (Silero VAD uses ~1GB RAM).
+  LatestUbuntuAmi:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Default: /aws/service/canonical/ubuntu/server/24.04/stable/current/amd64/hvm/ebs-gp3/ami-id
+    Description: Ubuntu 24.04 LTS (ships Python 3.12 natively, required for Nova Sonic).
+  UseElasticIp:
+    Type: String
+    Default: 'false'
+    AllowedValues: ['true', 'false']
+    Description: If true, allocate an EIP and associate it with the instance so the public IP survives instance replacement. Recommended for prod (Chime VC origination routes are hard-coded to an IP).
+  BedrockRegion:
+    Type: String
+    Default: us-east-1
+    Description: >-
+      Region used for Bedrock / Transcribe / Polly calls (the AWS_REGION the bot
+      uses). Independent of the deploy region so you can run the EC2 in, e.g.,
+      eu-central-1 while keeping Bedrock model IDs (us.* inference profiles) on
+      us-east-1. Leave at us-east-1 unless you have eu.* model access.
+  CloudFrontPrefixListId:
+    Type: String
+    Default: pl-3b927c52
+    Description: >-
+      Managed prefix list for CloudFront's origin-facing IPs IN THE DEPLOY
+      REGION. Default pl-3b927c52 is us-east-1's
+      com.amazonaws.global.cloudfront.origin-facing. For another region, look up
+      that region's id (EC2 console > Managed prefix lists, filter
+      "cloudfront.origin-facing") and pass it in — e.g. eu-central-1 uses a
+      different id. A wrong-region id makes the SecurityGroup fail to create.
+
+  # --- Chime SDK Voice Connector (optional; empty name => disabled) ---------
+  VoiceConnectorName:
+    Type: String
+    Default: ''
+    Description: >-
+      Name of the Chime SDK Voice Connector to create/reuse (idempotent by
+      name) and point at this stack's public IP for inbound PSTN. EMPTY (the
+      default) DISABLES all Chime provisioning — the stack is then byte-identical
+      to a no-Chime deploy. CloudFormation has no native VoiceConnector type, so
+      a Lambda-backed custom resource drives the chime-sdk-voice API (us-east-1).
+  PhoneNumberE164:
+    Type: String
+    Default: ''
+    Description: >-
+      An ALREADY-OWNED phone number (e.g. +15550001111) to associate with the
+      Voice Connector. The provisioner only associates/disassociates — it NEVER
+      orders or releases numbers (number procurement stays manual). Empty => only
+      create/route the VC, associate no number.
+  RetainVoiceConnectorOnDelete:
+    Type: String
+    Default: 'true'
+    AllowedValues: ['true', 'false']
+    Description: >-
+      On stack delete/rollback, keep the Voice Connector (true, default) or
+      delete it (false). Default true so a prod rollback never tears down the
+      phone line. The number is ALWAYS disassociated on delete (it returns to the
+      account, never released). Use false only on throwaway test stacks.
+  ForceAssociatePhoneNumber:
+    Type: String
+    Default: 'false'
+    AllowedValues: ['true', 'false']
+    Description: >-
+      Pass ForceAssociate=true when associating the number (steals it from any
+      other Voice Connector it is currently on). Default false (safe). Set true
+      only for a number you are certain belongs to this stack.
+
+Conditions:
+  HasMinimaxKey: !Not [!Equals [!Ref MinimaxApiKey, '']]
+  UseEip: !Equals [!Ref UseElasticIp, 'true']
+  EnableChime: !Not [!Equals [!Ref VoiceConnectorName, '']]
+
+Resources:
+  # --- Secrets --------------------------------------------------------------
+
+  MinimaxSecret:
+    Type: AWS::SecretsManager::Secret
+    Condition: HasMinimaxKey
+    Properties:
+      Name: !Sub '${AWS::StackName}-minimax'
+      SecretString: !Ref MinimaxApiKey
+
+  # --- IAM ------------------------------------------------------------------
+
+  InstanceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: { Service: ec2.amazonaws.com }
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+        - arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy
+      Policies:
+        - PolicyName: voicebot-runtime
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - bedrock:InvokeModel
+                  - bedrock:InvokeModelWithResponseStream
+                  - bedrock:InvokeModelWithBidirectionalStream
+                Resource: '*'
+              # Invoke MCP servers hosted on Bedrock AgentCore (SigV4-signed,
+              # see mcp_sigv4.py). Resource '*' because the runtime ARN is the
+              # operator's own and not known at template synth time; scoped to
+              # the single invoke action (NOT AgentCore management/full access).
+              - Effect: Allow
+                Action:
+                  - bedrock-agentcore:InvokeAgentRuntime
+                Resource: '*'
+              - Effect: Allow
+                Action:
+                  - transcribe:StartStreamTranscription
+                  - transcribe:StartStreamTranscriptionWebSocket
+                Resource: '*'
+              - Effect: Allow
+                Action:
+                  - polly:SynthesizeSpeech
+                Resource: '*'
+              # Chime SDK Voice Connector — READ-ONLY, for the admin
+              # GET /api/admin/phone-numbers view (VC ↔ phone-number). List/Get
+              # only: NO Create/Associate/Disassociate/Order/Release/Delete/Put/
+              # Update — the instance never mutates Chime (provisioning writes
+              # live in the separate ChimeProvisionerRole). Resource '*' because
+              # Chime VC APIs are account-level (no fine-grained ARN).
+              - Effect: Allow
+                Action:
+                  - chime:ListVoiceConnectors
+                  - chime:ListPhoneNumbers
+                  - chime:GetPhoneNumber
+                Resource: '*'
+              - !If
+                - HasMinimaxKey
+                - Effect: Allow
+                  Action: secretsmanager:GetSecretValue
+                  Resource: !Ref MinimaxSecret
+                - !Ref AWS::NoValue
+              - Effect: Allow
+                Action: s3:GetObject
+                Resource: !Sub 'arn:aws:s3:::${CodeBucket}/*'
+              - Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                  - dynamodb:PutItem
+                  - dynamodb:UpdateItem
+                  - dynamodb:Query
+                  - dynamodb:Scan
+                  - dynamodb:BatchGetItem
+                Resource:
+                  - !GetAtt HistoryTable.Arn
+                  - !Sub '${HistoryTable.Arn}/index/*'
+              # Users table (admin/JWT accounts). Needs full read+write incl.
+              # DeleteItem (admin user management). Without this the first-run
+              # /setup wizard's PutItem hits AccessDenied.
+              - Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                  - dynamodb:PutItem
+                  - dynamodb:UpdateItem
+                  - dynamodb:DeleteItem
+                  - dynamodb:Query
+                  - dynamodb:Scan
+                  - dynamodb:BatchGetItem
+                Resource:
+                  - !GetAtt UsersTable.Arn
+                  - !Sub '${UsersTable.Arn}/index/*'
+              # Demos table (demo scenarios; DB is the source of truth).
+              - Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                  - dynamodb:PutItem
+                  - dynamodb:UpdateItem
+                  - dynamodb:Query
+                  - dynamodb:Scan
+                  - dynamodb:BatchGetItem
+                Resource:
+                  - !GetAtt DemosTable.Arn
+              # Voices table (editable voice registry; admin CRUD incl. delete)
+              # and Activity table (operations audit log; written + queried, the
+              # log is append-only). DeleteItem is required by VoiceStore.delete().
+              - Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                  - dynamodb:PutItem
+                  - dynamodb:UpdateItem
+                  - dynamodb:DeleteItem
+                  - dynamodb:Query
+                  - dynamodb:Scan
+                  - dynamodb:BatchGetItem
+                Resource:
+                  - !GetAtt VoicesTable.Arn
+                  - !GetAtt ActivityTable.Arn
+
+  InstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Roles: [!Ref InstanceRole]
+
+  # --- DynamoDB -------------------------------------------------------------
+
+  HistoryTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub '${AWS::StackName}-call-history'
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: call_id
+          AttributeType: S
+        - AttributeName: caller
+          AttributeType: S
+        - AttributeName: started_at
+          AttributeType: N
+      KeySchema:
+        - AttributeName: call_id
+          KeyType: HASH
+      GlobalSecondaryIndexes:
+        - IndexName: caller-started-index
+          KeySchema:
+            - AttributeName: caller
+              KeyType: HASH
+            - AttributeName: started_at
+              KeyType: RANGE
+          Projection:
+            ProjectionType: KEYS_ONLY
+      TimeToLiveSpecification:
+        AttributeName: ttl
+        Enabled: true
+
+  UsersTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub '${AWS::StackName}-users'
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: username
+          AttributeType: S
+      KeySchema:
+        - AttributeName: username
+          KeyType: HASH
+
+  # Demo scenarios (DB is the source of truth; data/ kept only as seed).
+  # Retain so the table (and edited demo content) survives stack replacement.
+  DemosTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      TableName: !Sub '${AWS::StackName}-demos'
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: id
+          KeyType: HASH
+
+  # Global editable voice registry (provider + voice_id composite key).
+  # Retain so admin-edited voices survive stack replacement (mirrors DemosTable).
+  VoicesTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      TableName: !Sub '${AWS::StackName}-voices'
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: provider
+          AttributeType: S
+        - AttributeName: voice_id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: provider
+          KeyType: HASH
+        - AttributeName: voice_id
+          KeyType: RANGE
+
+  # Operations audit log (who did what, when). day(HASH)+ts_id(RANGE) so a
+  # time-range query hits a small set of day partitions. TTL auto-expires rows.
+  # Retain so the audit trail survives stack replacement (mirrors DemosTable).
+  ActivityTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      TableName: !Sub '${AWS::StackName}-activity'
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: day
+          AttributeType: S
+        - AttributeName: ts_id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: day
+          KeyType: HASH
+        - AttributeName: ts_id
+          KeyType: RANGE
+      TimeToLiveSpecification:
+        AttributeName: ttl
+        Enabled: true
+
+  # --- Network --------------------------------------------------------------
+
+  SecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: VoiceBot CloudFront origin to EC2 7860
+      SecurityGroupIngress:
+        # CloudFront → EC2:7860 (web UI + WebSocket)
+        - IpProtocol: tcp
+          FromPort: 7860
+          ToPort: 7860
+          SourcePrefixListId: !Ref CloudFrontPrefixListId  # CloudFront origin-facing prefix list for the DEPLOY region (see param)
+        # Chime SDK Voice Connector → SIP signalling (UDP 5060) and RTP media
+        # (UDP 10000-10999). CIDRs sourced from AWS ip-ranges.json filtered by
+        # service=CHIME_VOICECONNECTOR & region=us-east-1. No managed prefix
+        # list is published for this service, so the CIDRs are inlined.
+        - IpProtocol: udp
+          FromPort: 5060
+          ToPort: 5060
+          CidrIp: 99.77.254.0/24
+          Description: SIP signalling Chime VC us-east-1 (block 1)
+        - IpProtocol: udp
+          FromPort: 5060
+          ToPort: 5060
+          CidrIp: 3.80.16.0/23
+          Description: SIP signalling Chime VC us-east-1 (block 2)
+        - IpProtocol: udp
+          FromPort: 10000
+          ToPort: 10999
+          CidrIp: 99.77.254.0/24
+          Description: RTP media Chime VC us-east-1 (block 1)
+        - IpProtocol: udp
+          FromPort: 10000
+          ToPort: 10999
+          CidrIp: 3.80.16.0/23
+          Description: RTP media Chime VC us-east-1 (block 2)
+
+  # --- EC2 ------------------------------------------------------------------
+
+  Instance:
+    Type: AWS::EC2::Instance
+    CreationPolicy:
+      ResourceSignal:
+        Timeout: PT15M
+    Properties:
+      InstanceType: !Ref InstanceType
+      ImageId: !Ref LatestUbuntuAmi
+      IamInstanceProfile: !Ref InstanceProfile
+      SecurityGroupIds: [!Ref SecurityGroup]
+      BlockDeviceMappings:
+        - DeviceName: /dev/sda1
+          Ebs:
+            VolumeSize: 20
+            VolumeType: gp3
+            DeleteOnTermination: true
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-ec2'
+      UserData:
+        Fn::Base64: !Sub
+          - |
+            #!/bin/bash
+            set -e
+            exec > >(tee /var/log/user-data.log | logger -t user-data -s 2>/dev/console) 2>&1
+
+            export DEBIAN_FRONTEND=noninteractive
+            apt-get update
+            apt-get install -y python3.12 python3.12-venv python3-pip git curl unzip ffmpeg
+
+            # Node.js 20 (for voice-server)
+            curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
+            apt-get install -y nodejs
+
+            # AWS CLI v2
+            curl -fsSL "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o /tmp/awscli.zip
+            unzip -q /tmp/awscli.zip -d /tmp
+            /tmp/aws/install
+
+            # cfn-signal (needs python-pip-based package)
+            apt-get install -y python3-pip
+            pip3 install --break-system-packages https://s3.amazonaws.com/cloudformation-examples/aws-cfn-bootstrap-py3-latest.tar.gz || true
+
+            mkdir -p /opt/voicebot
+            # Writable dir for the structured latency JSONL (LATENCY_LOG_PATH
+            # below points here). /var/log is root:syslog and the bot runs as
+            # ubuntu, so latency records were silently dropped before this.
+            mkdir -p /opt/voicebot/logs && chown ubuntu:ubuntu /opt/voicebot/logs
+            aws s3 cp "s3://${CodeBucket}/${CodeKey}" /tmp/code.tar.gz --region ${AWS::Region}
+            tar -xzf /tmp/code.tar.gz -C /opt/voicebot
+
+            cd /opt/voicebot
+            python3.12 -m venv .venv
+            .venv/bin/pip install --upgrade pip wheel
+            .venv/bin/pip install \
+              'pipecat-ai[aws,aws-nova-sonic,silero,websocket]==1.4.0' \
+              boto3 aioboto3 aiohttp python-dotenv fastapi uvicorn \
+              'ruamel.yaml>=0.18,<0.19' PyYAML 'mcp>=1.0' \
+              'bcrypt>=4' 'PyJWT>=2'
+
+            # Fetch MiniMax key if we stored one
+            MINIMAX_KEY=""
+            if [ -n "${MinimaxSecretArn}" ]; then
+              MINIMAX_KEY=$(aws secretsmanager get-secret-value --secret-id "${MinimaxSecretArn}" \
+                --query SecretString --output text --region ${AWS::Region} 2>/dev/null || echo '')
+            fi
+
+            # Determine the EC2 public IPv4 (used as PUBLIC_IP for SDP).
+            TOKEN=$(curl -s -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 60")
+            EC2_PUBLIC_IP=$(curl -s -H "X-aws-ec2-metadata-token: $TOKEN" http://169.254.169.254/latest/meta-data/public-ipv4 || echo "0.0.0.0")
+
+            # NOTE: quoted heredoc (<<'EOF') so the instance shell performs NO
+            # dollar-sign or backtick expansion on the body. This keeps
+            # SitePassword / AdminPassword (substituted here as literals by CFN
+            # !Sub at template-upload time) byte-for-byte intact even when they
+            # contain a dollar sign, backticks, or spaces. CFN !Sub still
+            # resolves its own brace placeholders because it runs before the
+            # shell ever sees this text.
+            # Shell-runtime values (MINIMAX_KEY, EC2_PUBLIC_IP) are intentionally
+            # NOT in this block — they are appended via printf below so they get
+            # expanded by the shell without endangering the password lines.
+            cat > /opt/voicebot/.env <<'EOF'
+            AWS_REGION=${BedrockRegion}
+            DDB_REGION=${AWS::Region}
+            MINIMAX_BASE_URL=https://api.minimax.chat/v1/t2a_v2
+            MINIMAX_MODEL=speech-2.8-turbo
+            SITE_PASSWORD=${SitePassword}
+            ADMIN_PASSWORD=${AdminPassword}
+
+            # Inbound phone defaults (apply to every call from Chime Voice Connector).
+            # Routes every PSTN call to Nova Sonic v2 (English) with the
+            # ACME Security Tech Support KB scenario.
+            PHONE_ENGINE=nova-sonic
+            PHONE_LANG=en-US
+            PHONE_SCENARIO=acme-security-support
+            PHONE_VOICE=tiffany
+            # Pipeline-mode fallbacks (only used if PHONE_ENGINE=pipeline)
+            PHONE_PROVIDER=minimax
+            PHONE_MODEL=nova-2-lite
+            PHONE_MINIMAX_MODEL=speech-2.8-turbo
+
+            # voice-server (Node SIP bridge)
+            RTP_PORT_BASE=10000
+            RTP_PORT_COUNT=1000
+            PIPECAT_WS_URL=ws://127.0.0.1:7860/phone/ws
+
+            # Call history persistence (DynamoDB)
+            HISTORY_TABLE=${HistoryTable}
+            HISTORY_TTL_DAYS=30
+            # Users / admin accounts table. Must be set per-stack, else
+            # user_store defaults to the hardcoded 'genaiic-voicebot-users'
+            # and a non-prod stack would point at the prod table.
+            USERS_TABLE=${UsersTable}
+            # Demo scenarios table (DB is the source of truth; data/ is seed).
+            # Like USERS_TABLE, must be set per-stack so non-prod stacks don't
+            # point at another stack's demos table.
+            DEMOS_TABLE=${DemosTable}
+            # Editable voice registry table. Set per-stack like DEMOS_TABLE so
+            # non-prod stacks don't point at another stack's voices table.
+            VOICES_TABLE=${VoicesTable}
+            # Operations audit log table + row retention (days). Set per-stack.
+            ACTIVITY_TABLE=${ActivityTable}
+            ACTIVITY_LOG_TTL_DAYS=90
+
+            # Structured per-turn latency JSONL. Points at the ubuntu-writable
+            # /opt/voicebot/logs dir created above (NOT /var/log, which is
+            # root:syslog and silently dropped writes). Empty string disables.
+            LATENCY_LOG_PATH=/opt/voicebot/logs/latency.jsonl
+
+            # LLM hangup / transfer-to-human tools (phone-leg only)
+            PHONE_TOOLS_ENABLED=1
+            EOF
+
+            # Shell-runtime values: appended AFTER the quoted heredoc so the
+            # shell expands them, while the password lines above stay verbatim.
+            printf '%s\n' "MINIMAX_API_KEY=$MINIMAX_KEY" >> /opt/voicebot/.env
+            printf '%s\n' "PUBLIC_IP=$EC2_PUBLIC_IP" >> /opt/voicebot/.env
+
+            # Build voice-server (TypeScript). Skips gracefully if dir missing.
+            if [ -d /opt/voicebot/voice-server ]; then
+              cd /opt/voicebot/voice-server
+              npm install --production=false
+              npx tsc
+              cd /opt/voicebot
+            fi
+
+            chown -R ubuntu:ubuntu /opt/voicebot
+
+            cat > /etc/systemd/system/voicebot.service <<'SERVICE'
+            [Unit]
+            Description=GenAIIC Voice Bot
+            After=network.target
+
+            [Service]
+            User=ubuntu
+            WorkingDirectory=/opt/voicebot
+            ExecStart=/opt/voicebot/.venv/bin/python bot.py --host 0.0.0.0 --port 7860
+            Restart=always
+            RestartSec=5
+            EnvironmentFile=/opt/voicebot/.env
+            StandardOutput=append:/var/log/voicebot.log
+            StandardError=append:/var/log/voicebot.log
+
+            [Install]
+            WantedBy=multi-user.target
+            SERVICE
+
+            cat > /etc/systemd/system/voiceserver.service <<'SERVICE'
+            [Unit]
+            Description=GenAIIC Voice Server (SIP/RTP -> Pipecat bridge)
+            After=network.target voicebot.service
+
+            [Service]
+            User=ubuntu
+            WorkingDirectory=/opt/voicebot/voice-server
+            ExecStart=/usr/bin/node dist/server.js
+            Restart=always
+            RestartSec=5
+            EnvironmentFile=/opt/voicebot/.env
+            StandardOutput=append:/var/log/voiceserver.log
+            StandardError=append:/var/log/voiceserver.log
+
+            [Install]
+            WantedBy=multi-user.target
+            SERVICE
+
+            systemctl daemon-reload
+            systemctl enable --now voicebot
+            if [ -d /opt/voicebot/voice-server/dist ]; then
+              systemctl enable --now voiceserver
+            fi
+
+            /usr/local/bin/cfn-signal -e $? --stack ${AWS::StackName} --resource Instance --region ${AWS::Region} || true
+          - MinimaxSecretArn: !If [HasMinimaxKey, !Ref MinimaxSecret, '']
+
+  # --- Elastic IP (optional) ------------------------------------------------
+  # When UseElasticIp=true, allocate an EIP and bind it to the instance so the
+  # public IP survives stop/start and instance replacement. Required for prod
+  # because Chime VC origination routes are hard-coded to a specific IP.
+
+  ElasticIp:
+    Type: AWS::EC2::EIP
+    Condition: UseEip
+    Properties:
+      Domain: vpc
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-eip'
+
+  ElasticIpAssoc:
+    Type: AWS::EC2::EIPAssociation
+    Condition: UseEip
+    Properties:
+      AllocationId: !GetAtt ElasticIp.AllocationId
+      InstanceId: !Ref Instance
+
+  # --- Chime SDK Voice Connector provisioning (Condition EnableChime) -------
+  # CloudFormation has no native AWS::Chime::VoiceConnector; a Lambda-backed
+  # custom resource drives the chime-sdk-voice API. Number lifecycle is
+  # associate/disassociate ONLY (never order/release). VC retained on delete by
+  # default. The inline ZipFile MUST stay in sync with
+  # deploy/chime_provisioner_handler.py (guarded by tests/test_chime_provisioner.py
+  # ::test_chime_inline_matches_handler).
+
+  ChimeProvisionerRole:
+    Type: AWS::IAM::Role
+    Condition: EnableChime
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: { Service: lambda.amazonaws.com }
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: chime-vc-provisioner
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              # VC + origination + number ASSOCIATION only. No CreatePhoneNumberOrder,
+              # no Release/DeletePhoneNumber — number procurement stays manual.
+              - Effect: Allow
+                Action:
+                  - chime:CreateVoiceConnector
+                  - chime:ListVoiceConnectors
+                  - chime:GetVoiceConnector
+                  - chime:DeleteVoiceConnector
+                  - chime:PutVoiceConnectorOrigination
+                  - chime:AssociatePhoneNumbersWithVoiceConnector
+                  - chime:DisassociatePhoneNumbersFromVoiceConnector
+                  - chime:ListPhoneNumbers
+                Resource: '*'
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: 'arn:aws:logs:*:*:*'
+
+  ChimeProvisionerFn:
+    Type: AWS::Lambda::Function
+    Condition: EnableChime
+    Properties:
+      Runtime: python3.12
+      Handler: index.handler
+      Timeout: 120
+      Role: !GetAtt ChimeProvisionerRole.Arn
+      Code:
+        # MUST mirror deploy/chime_provisioner_handler.py (drift-guard test).
+        ZipFile: |
+          import json
+          import urllib.request
+
+          REGION = "us-east-1"
+          SUCCESS = "SUCCESS"
+          FAILED = "FAILED"
+
+
+          def send(event, context, status, data=None, physical_id=None, reason=None):
+              body = {
+                  "Status": status,
+                  "Reason": reason or ("See CloudWatch Log Stream: " + (getattr(context, "log_stream_name", "") or "n/a")),
+                  "PhysicalResourceId": physical_id or "chime-voice-connector",
+                  "StackId": event.get("StackId", ""),
+                  "RequestId": event.get("RequestId", ""),
+                  "LogicalResourceId": event.get("LogicalResourceId", ""),
+                  "NoEcho": False,
+                  "Data": data or {},
+              }
+              payload = json.dumps(body).encode("utf-8")
+              req = urllib.request.Request(event["ResponseURL"], data=payload, method="PUT",
+                                           headers={"content-type": "", "content-length": str(len(payload))})
+              urllib.request.urlopen(req)
+
+
+          def find_vc_by_name(client, name):
+              next_token = None
+              while True:
+                  kwargs = {"MaxResults": 99}
+                  if next_token:
+                      kwargs["NextToken"] = next_token
+                  resp = client.list_voice_connectors(**kwargs)
+                  for vc in resp.get("VoiceConnectors", []):
+                      if vc.get("Name") == name:
+                          return vc.get("VoiceConnectorId")
+                  next_token = resp.get("NextToken")
+                  if not next_token:
+                      return None
+
+
+          def ensure_vc(client, name):
+              existing = find_vc_by_name(client, name)
+              if existing:
+                  print(f"[chime] reusing existing VoiceConnector {existing} (name={name})")
+                  return existing
+              resp = client.create_voice_connector(Name=name, AwsRegion=REGION, RequireEncryption=False)
+              vc_id = resp["VoiceConnector"]["VoiceConnectorId"]
+              print(f"[chime] created VoiceConnector {vc_id} (name={name})")
+              return vc_id
+
+
+          def set_origination(client, vc_id, ip):
+              client.put_voice_connector_origination(
+                  VoiceConnectorId=vc_id,
+                  Origination={"Routes": [{"Host": ip, "Port": 5060, "Protocol": "UDP", "Priority": 1, "Weight": 1}], "Disabled": False},
+              )
+              print(f"[chime] origination set: {vc_id} -> {ip}:5060/UDP")
+
+
+          def assoc_number(client, vc_id, e164, force=False):
+              client.associate_phone_numbers_with_voice_connector(
+                  VoiceConnectorId=vc_id, E164PhoneNumbers=[e164], ForceAssociate=bool(force))
+              print(f"[chime] associated {e164} -> {vc_id} (force={bool(force)})")
+
+
+          def disassoc_number(client, vc_id, e164):
+              client.disassociate_phone_numbers_from_voice_connector(
+                  VoiceConnectorId=vc_id, E164PhoneNumbers=[e164])
+              print(f"[chime] disassociated {e164} from {vc_id} (number kept in account)")
+
+
+          def _truthy(v):
+              return str(v).strip().lower() in ("1", "true", "yes", "on")
+
+
+          def handle_create_update(client, props, old_props=None):
+              name = props["Name"]
+              ip = props.get("OriginationIp") or ""
+              number = (props.get("PhoneNumber") or "").strip()
+              force = _truthy(props.get("ForceAssociate", "false"))
+              vc_id = ensure_vc(client, name)
+              old_ip = (old_props or {}).get("OriginationIp")
+              if old_props is None or old_ip != ip:
+                  if ip:
+                      set_origination(client, vc_id, ip)
+              old_number = ((old_props or {}).get("PhoneNumber") or "").strip()
+              if old_props is not None and old_number and old_number != number:
+                  try:
+                      disassoc_number(client, vc_id, old_number)
+                  except Exception as e:
+                      print(f"[chime] disassociate old number {old_number} ignored: {e}")
+              if number and number != old_number:
+                  assoc_number(client, vc_id, number, force=force)
+              return vc_id, {"VoiceConnectorId": vc_id, "OriginationIp": ip}
+
+
+          def handle_delete(client, props, physical_id):
+              name = props["Name"]
+              number = (props.get("PhoneNumber") or "").strip()
+              retain = _truthy(props.get("Retain", "true"))
+              if physical_id and physical_id.startswith("vc-"):
+                  vc_id = physical_id
+              else:
+                  vc_id = find_vc_by_name(client, name)
+              if not vc_id:
+                  print(f"[chime] delete: no VC found for name={name}; nothing to do")
+                  return physical_id or "chime-voice-connector", {}
+              if number:
+                  try:
+                      disassoc_number(client, vc_id, number)
+                  except Exception as e:
+                      print(f"[chime] delete: disassociate {number} ignored: {e}")
+              if retain:
+                  print(f"[chime] delete: RETAIN policy — leaving VC {vc_id} in place")
+              else:
+                  try:
+                      client.delete_voice_connector(VoiceConnectorId=vc_id)
+                      print(f"[chime] delete: removed VC {vc_id}")
+                  except Exception as e:
+                      print(f"[chime] delete: delete_voice_connector ignored: {e}")
+              return vc_id, {}
+
+
+          def make_client():
+              import boto3
+              return boto3.client("chime-sdk-voice", region_name=REGION)
+
+
+          def handler(event, context):
+              request_type = event.get("RequestType")
+              props = event.get("ResourceProperties", {}) or {}
+              old_props = event.get("OldResourceProperties") or None
+              physical_id = event.get("PhysicalResourceId")
+              print(f"[chime] {request_type} props={json.dumps(props)}")
+              try:
+                  client = make_client()
+                  if request_type in ("Create", "Update"):
+                      pid, data = handle_create_update(client, props, old_props if request_type == "Update" else None)
+                      send(event, context, SUCCESS, data=data, physical_id=pid)
+                  elif request_type == "Delete":
+                      pid, data = handle_delete(client, props, physical_id)
+                      send(event, context, SUCCESS, data=data, physical_id=pid)
+                  else:
+                      send(event, context, FAILED, reason=f"unknown RequestType: {request_type}", physical_id=physical_id)
+              except Exception as e:
+                  print(f"[chime] ERROR: {e}")
+                  send(event, context, FAILED, reason=str(e), physical_id=physical_id)
+
+  ChimeVoiceConnector:
+    Type: Custom::ChimeVoiceConnector
+    Condition: EnableChime
+    # No explicit DependsOn needed: the Instance dependency is implicit in BOTH
+    # paths — UseEip=false via OriginationIp's !GetAtt Instance.PublicIp, and
+    # UseEip=true via EipAssocId's !Ref ElasticIpAssoc (which itself depends on
+    # Instance). The EipAssocId ref is what guarantees put-origination runs only
+    # after the EIP is bound.
+    Properties:
+      ServiceToken: !GetAtt ChimeProvisionerFn.Arn
+      Name: !Ref VoiceConnectorName
+      OriginationIp: !If [UseEip, !Ref ElasticIp, !GetAtt Instance.PublicIp]
+      PhoneNumber: !Ref PhoneNumberE164
+      Retain: !Ref RetainVoiceConnectorOnDelete
+      ForceAssociate: !Ref ForceAssociatePhoneNumber
+      # Implicit dependency on the EIP→instance binding: when UseEip=true this
+      # forces the custom resource (and its put-origination) to run only AFTER
+      # ElasticIpAssoc completes, so origination never points at an unbound EIP.
+      # On UseEip=false the property (and dependency) vanishes via AWS::NoValue.
+      EipAssocId: !If [UseEip, !Ref ElasticIpAssoc, !Ref 'AWS::NoValue']
+
+  # --- CloudFront -----------------------------------------------------------
+
+  Distribution:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+        Comment: !Sub '${AWS::StackName} voice bot'
+        Enabled: true
+        HttpVersion: http2
+        IPV6Enabled: true
+        PriceClass: PriceClass_100
+        Origins:
+          - Id: EC2Origin
+            # When UseElasticIp=true, use the EIP-derived public DNS so the
+            # origin stays valid across instance replacement. Otherwise fall
+            # back to the auto-assigned Instance.PublicDnsName.
+            # EIP public DNS form is ec2-<ip-with-dashes>.compute-1.amazonaws.com.
+            DomainName: !If
+              - UseEip
+              - !Sub
+                - 'ec2-${DashedIp}.compute-1.amazonaws.com'
+                - DashedIp: !Join ['-', !Split ['.', !Ref ElasticIp]]
+              - !GetAtt Instance.PublicDnsName
+            CustomOriginConfig:
+              HTTPPort: 7860
+              OriginProtocolPolicy: http-only
+              OriginReadTimeout: 60
+              OriginKeepaliveTimeout: 60
+        DefaultCacheBehavior:
+          TargetOriginId: EC2Origin
+          ViewerProtocolPolicy: redirect-to-https
+          AllowedMethods: [GET, HEAD, OPTIONS, PUT, POST, PATCH, DELETE]
+          CachedMethods: [GET, HEAD]
+          Compress: true
+          # CachingDisabled — audio + WS must never cache
+          CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad
+          # AllViewerExceptHostHeader — forwards everything but rewrites Host
+          # so origin validation works.
+          OriginRequestPolicyId: b689b0a8-53d0-40ab-baf2-68738e2966ac
+        ViewerCertificate:
+          CloudFrontDefaultCertificate: true
+          MinimumProtocolVersion: TLSv1.2_2021
+
+Outputs:
+  URL:
+    Description: Open this in your browser.
+    Value: !Sub 'https://${Distribution.DomainName}/'
+  CloudFrontDomain:
+    Value: !GetAtt Distribution.DomainName
+  InstanceId:
+    Value: !Ref Instance
+  PublicDnsName:
+    Value: !GetAtt Instance.PublicDnsName
+  PublicIP:
+    Description: Stable EIP if UseElasticIp=true, else the auto-assigned instance IP.
+    Value: !If [UseEip, !Ref ElasticIp, !GetAtt Instance.PublicIp]
+  SSHCommand:
+    Description: SSM Session Manager command (no SSH key needed).
+    Value: !Sub 'aws ssm start-session --target ${Instance} --region ${AWS::Region}'
+  VoiceConnectorId:
+    Condition: EnableChime
+    Description: Chime SDK Voice Connector id (provisioned by the custom resource).
+    Value: !GetAtt ChimeVoiceConnector.VoiceConnectorId
+  VoiceConnectorOriginationIp:
+    Condition: EnableChime
+    Description: IP the Voice Connector origination route points at (this stack's public IP).
+    Value: !GetAtt ChimeVoiceConnector.OriginationIp

@@ -1,0 +1,36 @@
+config/runtime.json
+config/mcp_servers.json
+node_modules/
+dist/
+build/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.venv/
+venv/
+
+# Env / secrets
+.env
+.env.local
+*.pem
+*.key
+
+# OS / editor
+.DS_Store
+*.swp
+.idea/
+.vscode/
+
+# Chorus / Claude session state
+.chorus/
+.claude/
+CLAUDE.md
+minimax_output.wav
+*.wav
+
+# runtime logs (may contain real call transcripts)
+*.log
+error.log
